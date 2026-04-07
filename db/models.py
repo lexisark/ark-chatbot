@@ -96,6 +96,8 @@ class STMRelationship(Base):
     predicate: Mapped[str] = mapped_column(String(100), nullable=False)
     object_entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stm_entity.id", ondelete="CASCADE"), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    mention_count: Mapped[int] = mapped_column(Integer, default=1)
+    last_mentioned: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     source_msg_ids: Mapped[list] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

@@ -66,6 +66,15 @@ class ContextBuilder:
         result.recent_messages = self.tokens.fit_messages_to_budget(llm_messages, recent_budget)
         result.recent_tokens = self.tokens.count_messages(result.recent_messages) if result.recent_messages else 0
 
+        # Track context window start for dedup
+        context_window_start = None
+        if result.recent_messages and messages:
+            # Find the oldest message that's included in the context window
+            included_count = len(result.recent_messages)
+            oldest_included_idx = len(messages) - included_count
+            if 0 <= oldest_included_idx < len(messages):
+                context_window_start = messages[oldest_included_idx].created_at
+
         # Step 3: RAG memories (40% of budget)
         use_rag = enable_rag if enable_rag is not None else True
         if use_rag and current_message:
@@ -89,6 +98,7 @@ class ContextBuilder:
                 scope_id=chat.scope_id,
                 turn_count=turn_count,
                 query_embedding=query_embedding,
+                context_window_start=context_window_start,
             )
 
             # Format into text block

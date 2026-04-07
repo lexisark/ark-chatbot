@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +49,41 @@ def _cosine_distance_to_score(distance: float) -> float:
     return max(0.0, 1.0 - distance)
 
 
+# ── Recency scoring ────────────────────────────────────
+
+# Config defaults (from RAG_CONFIG where available)
+_BASE_HALF_LIFE_HOURS = 72  # 3 days
+_MENTION_FACTOR = 0.2       # Per-mention multiplier for half-life
+_MENTION_CAP = 5            # Max mentions factored in
+_CONFIDENCE_FACTOR = 0.5    # Confidence contribution to half-life
+
+
+def recency_score(
+    last_mentioned: datetime,
+    mention_count: int = 1,
+    confidence: float = 0.5,
+) -> float:
+    """Adaptive recency score with mention and confidence factors.
+
+    Higher mention_count → slower decay (entity is important).
+    Higher confidence → slower decay (entity is well-established).
+
+    Formula:
+        effective_half_life = base * (1 + mention_factor * min(mentions, cap)) * (1 + confidence_factor * confidence)
+        score = 0.5 ^ (age_hours / effective_half_life)
+    """
+    from datetime import timezone as tz
+    now = datetime.now(tz.utc)
+    age_hours = max(0.0, (now - last_mentioned).total_seconds() / 3600)
+
+    # Adaptive half-life
+    mention_mult = 1.0 + _MENTION_FACTOR * min(mention_count, _MENTION_CAP)
+    confidence_mult = 1.0 + _CONFIDENCE_FACTOR * confidence
+    effective_half_life = _BASE_HALF_LIFE_HOURS * mention_mult * confidence_mult
+
+    return math.pow(0.5, age_hours / effective_half_life)
+
+
 class RAGManager:
     """Retrieves and formats memories using hybrid FTS + vector search."""
 
@@ -67,6 +103,7 @@ class RAGManager:
         scope_id: str | None = None,
         turn_count: int = 1,
         query_embedding: list[float] | None = None,
+        context_window_start: datetime | None = None,
     ) -> YouRememberBlock:
         block = YouRememberBlock()
         keywords = _extract_keywords(query)
@@ -84,8 +121,10 @@ class RAGManager:
         episode_budget = int(budget_tokens * block.episode_budget_ratio)
         stm_budget = budget_tokens - episode_budget
 
-        # ── STM: entities (hybrid scored) ───────────────
-        stm_entities = await self._search_stm_entities(db, chat_id, keywords, query_embedding)
+        # ── STM: entities (hybrid scored, context window dedup) ───
+        stm_entities = await self._search_stm_entities(
+            db, chat_id, keywords, query_embedding, context_window_start,
+        )
         for e in stm_entities:
             line = f"- {e['entity'].canonical_name} ({e['entity'].entity_type})"
             if e['entity'].attributes:
@@ -102,8 +141,10 @@ class RAGManager:
             obj_name = obj.canonical_name if obj else "?"
             block.relationships.append(f"- {subj_name} {r.predicate} {obj_name}")
 
-        # ── STM: recaps (hybrid scored) ─────────────────
-        stm_recaps = await self._search_stm_recaps(db, chat_id, keywords, query_embedding)
+        # ── STM: recaps (hybrid scored, context window dedup) ───
+        stm_recaps = await self._search_stm_recaps(
+            db, chat_id, keywords, query_embedding, context_window_start,
+        )
         for r in stm_recaps:
             block.recaps.append(f"- {r['recap'].recap_text}")
 
@@ -136,13 +177,17 @@ class RAGManager:
     async def _search_stm_entities(
         self, db: AsyncSession, chat_id: uuid.UUID,
         keywords: list[str], query_embedding: list[float] | None,
+        context_window_start: datetime | None = None,
     ) -> list[dict]:
-        """Hybrid search STM entities: FTS keyword match + vector similarity."""
+        """Hybrid search STM entities: FTS keyword match + vector similarity.
+        Excludes entities first_mentioned within the context window."""
         stmt = (
             select(STMEntity)
             .where(STMEntity.chat_id == chat_id, STMEntity.overall_confidence >= 0.30)
             .limit(50)
         )
+        if context_window_start:
+            stmt = stmt.where(STMEntity.first_mentioned < context_window_start)
         result = await db.execute(stmt)
         entities = list(result.scalars().all())
 
@@ -162,8 +207,11 @@ class RAGManager:
             # Hybrid score
             hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
 
-            # Confidence-weighted final score
-            final_score = 0.5 * hybrid + 0.5 * e.overall_confidence
+            # Recency score
+            rec_score = recency_score(e.last_mentioned, e.mention_count, e.overall_confidence)
+
+            # Final: 40% hybrid match + 30% confidence + 30% recency
+            final_score = 0.4 * hybrid + 0.3 * e.overall_confidence + 0.3 * rec_score
 
             scored.append({"entity": e, "score": final_score})
 
@@ -173,14 +221,17 @@ class RAGManager:
     async def _search_stm_recaps(
         self, db: AsyncSession, chat_id: uuid.UUID,
         keywords: list[str], query_embedding: list[float] | None,
+        context_window_start: datetime | None = None,
     ) -> list[dict]:
-        """Hybrid search STM recaps."""
+        """Hybrid search STM recaps. Excludes recaps within the context window."""
         stmt = (
             select(STMRecap)
             .where(STMRecap.chat_id == chat_id)
             .order_by(STMRecap.created_at.desc())
             .limit(10)
         )
+        if context_window_start:
+            stmt = stmt.where(STMRecap.created_at < context_window_start)
         result = await db.execute(stmt)
         recaps = list(result.scalars().all())
 
@@ -198,7 +249,11 @@ class RAGManager:
                     vector_score = _cosine_distance_to_score(distance)
 
             hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
-            final_score = 0.5 * hybrid + 0.5 * r.confidence
+
+            # Recency for recaps (use created_at, mention_count=1)
+            rec_score = recency_score(r.created_at, mention_count=1, confidence=r.confidence)
+
+            final_score = 0.4 * hybrid + 0.3 * r.confidence + 0.3 * rec_score
 
             scored.append({"recap": r, "score": final_score})
 

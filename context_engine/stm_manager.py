@@ -173,6 +173,8 @@ class STMManager:
 
         if existing:
             existing.confidence = confidence
+            existing.mention_count += 1
+            existing.last_mentioned = datetime.now(timezone.utc)
             if source_msg_ids:
                 existing.source_msg_ids = list(set(existing.source_msg_ids or []) | set(source_msg_ids))
             await db.flush()
