@@ -103,23 +103,33 @@ Respond with ONLY valid JSON:
             max_tokens=1000,
         )
 
-        # Parse response
-        try:
-            # Strip code blocks
-            import re
-            cleaned = response.content.strip()
-            match = re.search(r"```(?:json)?\s*\n?(.*?)```", cleaned, re.DOTALL)
+        # Parse response — reuse extraction's robust parser
+        import re
+        cleaned = response.content.strip()
+        # Try closed code block
+        match = re.search(r"```(?:json)?\s*\n?(.*?)```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+        else:
+            # Try truncated code block
+            match = re.search(r"```(?:json)?\s*\n?(.*)", cleaned, re.DOTALL)
             if match:
                 cleaned = match.group(1).strip()
+
+        try:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse episode response: {response.content[:200]}")
-            data = {
-                "episode_summary": response.content[:500],
-                "keywords": [],
-                "importance_score": 0.5,
-                "emotional_tone": "neutral",
-            }
+            from context_engine.extraction import _try_repair_json
+            data = _try_repair_json(cleaned)
+            if data is None:
+                logger.warning(f"Failed to parse episode response: {response.content[:200]}")
+                # Fall back to using the raw text as the summary
+                data = {
+                    "episode_summary": response.content[:500],
+                    "keywords": [],
+                    "importance_score": 0.5,
+                    "emotional_tone": "neutral",
+                }
 
         # Generate embedding
         embedding_service = EmbeddingService(embedding_provider)

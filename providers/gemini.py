@@ -187,7 +187,10 @@ class GeminiEmbeddingProvider:
         result = await self.client.aio.models.embed_content(
             model=model,
             contents=text,
-            config={"task_type": task_type.upper()},
+            config={
+                "task_type": task_type.upper(),
+                "output_dimensionality": self._dimensions,
+            },
         )
         embedding = result.embeddings[0].values
         return EmbeddingResponse(
