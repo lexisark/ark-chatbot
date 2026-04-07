@@ -83,15 +83,27 @@ class LTMManager:
         context = "\n".join(context_parts)
 
         # Call LLM to generate episode narrative
-        prompt = f"""Summarize this conversation into a rich narrative episode (200-300 tokens).
-Include key entities, relationships, what was discussed, and the emotional tone.
-This episode will be used to recall this conversation in the future.
+        prompt = f"""Summarize what the USER shared in this conversation into a memory episode.
+This episode will be used to recall what we know about the user in future conversations.
+
+FOCUS ONLY ON THE USER:
+- What the user told us about themselves, their life, pets, people, places, preferences
+- What entities (people, pets, locations, objects) the user mentioned
+- What relationships between entities were revealed
+- The user's emotional tone and engagement level
+
+DO NOT include:
+- What the assistant said, did, or how it responded
+- The assistant's reactions, praise, or commentary
+- Any description of the assistant's behavior
+
+Write the summary in third person about the user (e.g., "The user has a dog named Max...")
 
 {context}
 
 Respond with ONLY valid JSON:
 {{
-    "episode_summary": "Rich narrative summary of the conversation...",
+    "episode_summary": "Summary of what the user shared (150-250 tokens)...",
     "keywords": ["keyword1", "keyword2"],
     "importance_score": 0.8,
     "emotional_tone": "positive|negative|neutral|mixed"

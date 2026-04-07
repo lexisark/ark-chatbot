@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # ── LTM Episodes ─────────────────────────────────────
     episode_interval_messages: int = 20
-    final_episode_min_messages: int = 3
+    final_episode_min_messages: int = 2
     episode_retrieval_limit: int = 5
 
     # ── Server ────────────────────────────────────────────
