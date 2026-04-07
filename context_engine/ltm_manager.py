@@ -147,11 +147,13 @@ Respond with ONLY valid JSON:
             ltm_e = existing.scalar_one_or_none()
 
             if ltm_e:
-                # Merge: update confidence, attributes, mention count
+                # Merge: update confidence, attributes, mention count, embedding
                 ltm_e.overall_confidence = max(ltm_e.overall_confidence, stm_e.overall_confidence)
                 ltm_e.mention_count += stm_e.mention_count
                 if stm_e.attributes:
                     ltm_e.attributes = {**ltm_e.attributes, **stm_e.attributes}
+                if stm_e.embedding is not None:
+                    ltm_e.embedding = stm_e.embedding
             else:
                 ltm_e = LTMEntity(
                     scope_id=scope_id,
@@ -161,6 +163,7 @@ Respond with ONLY valid JSON:
                     attributes=stm_e.attributes,
                     overall_confidence=stm_e.overall_confidence,
                     mention_count=stm_e.mention_count,
+                    embedding=stm_e.embedding,
                 )
                 db.add(ltm_e)
                 promoted += 1

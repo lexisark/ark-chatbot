@@ -1,26 +1,61 @@
-"""RAG manager — hybrid retrieval of STM + LTM memories for context assembly."""
+"""RAG manager — hybrid FTS + vector retrieval across STM + LTM tiers."""
 
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from context_engine.config import RAG_CONFIG
 from context_engine.models import YouRememberBlock
 from context_engine.tokens import TokenHelper
-from db.models import LTMEpisode, STMEntity, STMRecap, STMRelationship
+from db.models import LTMEntity, LTMEpisode, STMEntity, STMRecap, STMRelationship
 
 logger = logging.getLogger(__name__)
 
+# Stop words to filter from query keywords
+_STOP_WORDS = frozenset(
+    "a an the is are was were be been being have has had do does did will would "
+    "shall should may might can could i me my we our you your he she it they them "
+    "his her its their what which who whom this that these those am in on at to for "
+    "of and but or not with from by as if then so than too very just about up out "
+    "how when where why all each every both few more most some any no nor".split()
+)
+
+
+def _extract_keywords(query: str, max_keywords: int = 10) -> list[str]:
+    """Extract keywords from a query string, filtering stop words."""
+    words = query.lower().split()
+    keywords = [w.strip(".,!?;:'\"()[]{}") for w in words]
+    keywords = [w for w in keywords if w and w not in _STOP_WORDS and len(w) > 1]
+    return keywords[:max_keywords]
+
+
+def _keyword_match_score(text_to_match: str, keywords: list[str]) -> float:
+    """Score how well text matches the query keywords (0.0 to 1.0)."""
+    if not keywords:
+        return 0.0
+    text_lower = text_to_match.lower()
+    matches = sum(1 for kw in keywords if kw in text_lower)
+    return matches / len(keywords)
+
+
+def _cosine_distance_to_score(distance: float) -> float:
+    """Convert cosine distance (0=identical, 2=opposite) to score (1=identical, 0=far)."""
+    return max(0.0, 1.0 - distance)
+
 
 class RAGManager:
-    """Retrieves and formats memories for the context window."""
+    """Retrieves and formats memories using hybrid FTS + vector search."""
 
     def __init__(self, tokens: TokenHelper):
         self.tokens = tokens
+        self._fts_weight = RAG_CONFIG.get("hybrid_fts_weight", 0.7)
+        self._vector_weight = RAG_CONFIG.get("hybrid_vector_weight", 0.3)
+        self._vector_threshold = RAG_CONFIG.get("episode_vector_distance_threshold", 0.6)
 
     async def build_you_remember(
         self,
@@ -33,15 +68,10 @@ class RAGManager:
         turn_count: int = 1,
         query_embedding: list[float] | None = None,
     ) -> YouRememberBlock:
-        """Build the "You remember" block from STM + LTM.
-
-        Budget split:
-        - Episode budget varies by turn count (25% early → 10% late)
-        - Remaining goes to STM (entities, relationships, recaps)
-        """
         block = YouRememberBlock()
+        keywords = _extract_keywords(query)
 
-        # Determine episode budget ratio
+        # Determine episode budget ratio by turn count
         if turn_count <= 2:
             block.episode_budget_ratio = RAG_CONFIG["episode_budget_turn_1_2"]
         elif turn_count <= 5:
@@ -54,108 +84,247 @@ class RAGManager:
         episode_budget = int(budget_tokens * block.episode_budget_ratio)
         stm_budget = budget_tokens - episode_budget
 
-        # ── STM: entities ───────────────────────────────
-        entities = await self._get_stm_entities(db, chat_id)
-        for e in entities:
-            line = f"- {e.canonical_name} ({e.entity_type})"
-            if e.attributes:
-                attrs = ", ".join(f"{k}: {v}" for k, v in e.attributes.items())
+        # ── STM: entities (hybrid scored) ───────────────
+        stm_entities = await self._search_stm_entities(db, chat_id, keywords, query_embedding)
+        for e in stm_entities:
+            line = f"- {e['entity'].canonical_name} ({e['entity'].entity_type})"
+            if e['entity'].attributes:
+                attrs = ", ".join(f"{k}: {v}" for k, v in e['entity'].attributes.items())
                 line += f" — {attrs}"
             block.entities.append(line)
 
         # ── STM: relationships ──────────────────────────
         relationships = await self._get_stm_relationships(db, chat_id)
         for r in relationships:
-            # Resolve entity names
             subj = await db.get(STMEntity, r.subject_entity_id)
             obj = await db.get(STMEntity, r.object_entity_id)
             subj_name = subj.canonical_name if subj else "?"
             obj_name = obj.canonical_name if obj else "?"
             block.relationships.append(f"- {subj_name} {r.predicate} {obj_name}")
 
-        # ── STM: recaps ─────────────────────────────────
-        recaps = await self._get_stm_recaps(db, chat_id)
-        for rc in recaps:
-            block.recaps.append(f"- {rc.recap_text}")
+        # ── STM: recaps (hybrid scored) ─────────────────
+        stm_recaps = await self._search_stm_recaps(db, chat_id, keywords, query_embedding)
+        for r in stm_recaps:
+            block.recaps.append(f"- {r['recap'].recap_text}")
 
-        # ── LTM: episodes ──────────────────────────────
+        # ── LTM: episodes (hybrid scored) ───────────────
         if scope_id and episode_budget > 0:
-            episodes = await self._get_ltm_episodes(db, scope_id, chat_id)
-            for ep in episodes:
-                block.episodes.append(f"- {ep.episode_summary}")
+            ltm_episodes = await self._search_ltm_episodes(db, scope_id, chat_id, keywords, query_embedding)
+            for ep in ltm_episodes:
+                block.episodes.append(f"- {ep['episode'].episode_summary}")
+
+        # ── LTM: entities (hybrid scored) ───────────────
+        if scope_id:
+            ltm_entities = await self._search_ltm_entities(db, scope_id, keywords, query_embedding)
+            for e in ltm_entities:
+                # Avoid duplicating STM entities already in block
+                name = e['entity'].canonical_name
+                if not any(name in line for line in block.entities):
+                    line = f"- {name} ({e['entity'].entity_type})"
+                    if e['entity'].attributes:
+                        attrs = ", ".join(f"{k}: {v}" for k, v in e['entity'].attributes.items())
+                        line += f" — {attrs}"
+                    block.entities.append(line)
 
         # ── Truncate to budget ──────────────────────────
         self._truncate_block(block, stm_budget, episode_budget)
 
         return block
 
-    async def _get_stm_entities(
+    # ── Search Methods ──────────────────────────────────
+
+    async def _search_stm_entities(
         self, db: AsyncSession, chat_id: uuid.UUID,
-    ) -> list[STMEntity]:
+        keywords: list[str], query_embedding: list[float] | None,
+    ) -> list[dict]:
+        """Hybrid search STM entities: FTS keyword match + vector similarity."""
         stmt = (
             select(STMEntity)
-            .where(
-                STMEntity.chat_id == chat_id,
-                STMEntity.overall_confidence >= 0.30,
-            )
-            .order_by(STMEntity.overall_confidence.desc())
+            .where(STMEntity.chat_id == chat_id, STMEntity.overall_confidence >= 0.30)
             .limit(50)
         )
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        entities = list(result.scalars().all())
 
-    async def _get_stm_relationships(
-        self, db: AsyncSession, chat_id: uuid.UUID,
-    ) -> list[STMRelationship]:
-        stmt = (
-            select(STMRelationship)
-            .where(
-                STMRelationship.chat_id == chat_id,
-                STMRelationship.confidence >= 0.30,
-            )
-            .order_by(STMRelationship.confidence.desc())
-            .limit(30)
-        )
-        result = await db.execute(stmt)
-        return list(result.scalars().all())
+        scored = []
+        for e in entities:
+            # FTS score: keyword match against name + type + attributes
+            match_text = self._entity_match_text(e)
+            fts_score = _keyword_match_score(match_text, keywords)
 
-    async def _get_stm_recaps(
+            # Vector score: cosine similarity if both embeddings exist
+            vector_score = 0.0
+            if query_embedding and e.embedding is not None:
+                distance = self._cosine_distance(query_embedding, list(e.embedding))
+                if distance <= self._vector_threshold:
+                    vector_score = _cosine_distance_to_score(distance)
+
+            # Hybrid score
+            hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
+
+            # Confidence-weighted final score
+            final_score = 0.5 * hybrid + 0.5 * e.overall_confidence
+
+            scored.append({"entity": e, "score": final_score})
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    async def _search_stm_recaps(
         self, db: AsyncSession, chat_id: uuid.UUID,
-    ) -> list[STMRecap]:
+        keywords: list[str], query_embedding: list[float] | None,
+    ) -> list[dict]:
+        """Hybrid search STM recaps."""
         stmt = (
             select(STMRecap)
             .where(STMRecap.chat_id == chat_id)
             .order_by(STMRecap.created_at.desc())
-            .limit(5)
+            .limit(10)
         )
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        recaps = list(result.scalars().all())
 
-    async def _get_ltm_episodes(
+        scored = []
+        for r in recaps:
+            # FTS: match against recap text + keywords
+            match_text = r.recap_text + " " + " ".join(r.keywords or [])
+            fts_score = _keyword_match_score(match_text, keywords)
+
+            # Vector
+            vector_score = 0.0
+            if query_embedding and r.embedding is not None:
+                distance = self._cosine_distance(query_embedding, list(r.embedding))
+                if distance <= self._vector_threshold:
+                    vector_score = _cosine_distance_to_score(distance)
+
+            hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
+            final_score = 0.5 * hybrid + 0.5 * r.confidence
+
+            scored.append({"recap": r, "score": final_score})
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    async def _search_ltm_episodes(
         self, db: AsyncSession, scope_id: str, exclude_chat_id: uuid.UUID,
-    ) -> list[LTMEpisode]:
+        keywords: list[str], query_embedding: list[float] | None,
+    ) -> list[dict]:
+        """Hybrid search LTM episodes: FTS on summary + vector on embedding."""
         stmt = (
             select(LTMEpisode)
             .where(
                 LTMEpisode.scope_id == scope_id,
                 LTMEpisode.source_chat_id != exclude_chat_id,
             )
-            .order_by(
-                LTMEpisode.is_final.desc(),
-                LTMEpisode.importance_score.desc(),
-                LTMEpisode.episode_date.desc(),
-            )
-            .limit(RAG_CONFIG.get("episode_retrieval_limit", 5))
+            .order_by(LTMEpisode.importance_score.desc())
+            .limit(20)
+        )
+        result = await db.execute(stmt)
+        episodes = list(result.scalars().all())
+
+        scored = []
+        for ep in episodes:
+            # FTS: match against summary + keywords
+            match_text = ep.episode_summary + " " + " ".join(ep.keywords or [])
+            fts_score = _keyword_match_score(match_text, keywords)
+
+            # Vector
+            vector_score = 0.0
+            if query_embedding and ep.embedding is not None:
+                distance = self._cosine_distance(query_embedding, list(ep.embedding))
+                if distance <= self._vector_threshold:
+                    vector_score = _cosine_distance_to_score(distance)
+
+            hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
+
+            # Weight by importance
+            final_score = 0.5 * hybrid + 0.5 * ep.importance_score
+
+            scored.append({"episode": ep, "score": final_score})
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    async def _search_ltm_entities(
+        self, db: AsyncSession, scope_id: str,
+        keywords: list[str], query_embedding: list[float] | None,
+    ) -> list[dict]:
+        """Hybrid search LTM entities."""
+        stmt = (
+            select(LTMEntity)
+            .where(LTMEntity.scope_id == scope_id, LTMEntity.overall_confidence >= 0.30)
+            .limit(50)
+        )
+        result = await db.execute(stmt)
+        entities = list(result.scalars().all())
+
+        scored = []
+        for e in entities:
+            match_text = self._entity_match_text_ltm(e)
+            fts_score = _keyword_match_score(match_text, keywords)
+
+            vector_score = 0.0
+            if query_embedding and e.embedding is not None:
+                distance = self._cosine_distance(query_embedding, list(e.embedding))
+                if distance <= self._vector_threshold:
+                    vector_score = _cosine_distance_to_score(distance)
+
+            hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
+            final_score = 0.5 * hybrid + 0.5 * e.overall_confidence
+
+            scored.append({"entity": e, "score": final_score})
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    async def _get_stm_relationships(
+        self, db: AsyncSession, chat_id: uuid.UUID,
+    ) -> list[STMRelationship]:
+        stmt = (
+            select(STMRelationship)
+            .where(STMRelationship.chat_id == chat_id, STMRelationship.confidence >= 0.30)
+            .order_by(STMRelationship.confidence.desc())
+            .limit(30)
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
+    # ── Scoring Helpers ─────────────────────────────────
+
+    @staticmethod
+    def _entity_match_text(e: STMEntity) -> str:
+        parts = [e.canonical_name, e.entity_type]
+        if e.entity_subtype:
+            parts.append(e.entity_subtype)
+        if e.attributes:
+            parts.extend(str(v) for v in e.attributes.values())
+        return " ".join(parts)
+
+    @staticmethod
+    def _entity_match_text_ltm(e: LTMEntity) -> str:
+        parts = [e.canonical_name, e.entity_type]
+        if e.entity_subtype:
+            parts.append(e.entity_subtype)
+        if e.attributes:
+            parts.extend(str(v) for v in e.attributes.values())
+        return " ".join(parts)
+
+    @staticmethod
+    def _cosine_distance(a: list[float], b: list[float]) -> float:
+        """Compute cosine distance (0=identical, 2=opposite)."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(x * x for x in b))
+        if norm_a == 0 or norm_b == 0:
+            return 1.0
+        similarity = dot / (norm_a * norm_b)
+        return 1.0 - similarity  # distance
+
+    # ── Budget Truncation ───────────────────────────────
+
     def _truncate_block(
         self, block: YouRememberBlock, stm_budget: int, episode_budget: int,
     ) -> None:
-        """Truncate block sections to fit within token budgets."""
-
-        # Truncate STM sections
         stm_used = 0
         block.entities = self._fit_lines(block.entities, stm_budget, stm_used)
         stm_used += self._count_lines(block.entities)
@@ -166,14 +335,12 @@ class RAGManager:
         block.recaps = self._fit_lines(block.recaps, stm_budget, stm_used)
         stm_used += self._count_lines(block.recaps)
 
-        # Truncate episodes
         block.episodes = self._fit_lines(block.episodes, episode_budget, 0)
         episode_used = self._count_lines(block.episodes)
 
         block.total_tokens = stm_used + episode_used
 
     def _fit_lines(self, lines: list[str], budget: int, used: int) -> list[str]:
-        """Keep lines that fit within remaining budget."""
         fitted = []
         current = used
         for line in lines:

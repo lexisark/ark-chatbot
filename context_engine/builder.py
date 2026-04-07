@@ -25,8 +25,9 @@ class ContextBuilder:
         - RAG memories: 40% (configurable, placeholder in Phase 2)
     """
 
-    def __init__(self, token_counter: TokenCounter):
+    def __init__(self, token_counter: TokenCounter, embedding_service=None):
         self.tokens = TokenHelper(token_counter)
+        self._embedding_service = embedding_service
 
     async def build_context(
         self,
@@ -74,11 +75,20 @@ class ContextBuilder:
             rag_budget = int(budget_tokens * BUILDER_CONFIG["rag_budget_ratio"])
             rag = RAGManager(self.tokens)
 
+            # Generate query embedding once for all RAG search tiers
+            query_embedding = None
+            if self._embedding_service:
+                try:
+                    query_embedding = await self._embedding_service.generate_query_embedding(current_message)
+                except Exception:
+                    logger.warning("Failed to generate query embedding", exc_info=True)
+
             turn_count = await count_user_messages(db, chat_id)
             you_remember = await rag.build_you_remember(
                 db, chat_id, current_message, rag_budget,
                 scope_id=chat.scope_id,
                 turn_count=turn_count,
+                query_embedding=query_embedding,
             )
 
             # Format into text block

@@ -19,10 +19,28 @@ CONFIDENCE_CAP = 0.95
 
 
 class STMManager:
-    def __init__(self):
+    def __init__(self, embedding_service=None):
         self._max_entities = STM_CONFIG["max_entities_per_chat"]
         self._boost = STM_CONFIG["fact_reinforcement_boost"]
         self._min_confidence = STM_CONFIG["min_confidence_threshold"]
+        self._embedding_service = embedding_service
+
+    def _entity_text(self, canonical_name: str, entity_type: str, attributes: dict | None) -> str:
+        """Build text representation for embedding."""
+        text = f"{canonical_name} ({entity_type})"
+        if attributes:
+            attrs = ", ".join(f"{k}: {v}" for k, v in attributes.items())
+            text += f" — {attrs}"
+        return text
+
+    async def _generate_embedding(self, text: str) -> list[float] | None:
+        if self._embedding_service is None:
+            return None
+        try:
+            return await self._embedding_service.generate_document_embedding(text)
+        except Exception:
+            logger.warning(f"Failed to generate embedding for: {text[:50]}", exc_info=True)
+            return None
 
     async def upsert_entity(
         self,
@@ -62,12 +80,21 @@ class STMManager:
             existing.updated_at = now
 
             # Merge attributes
+            attrs_changed = False
             if attributes:
                 merged = {**existing.attributes, **attributes}
+                if merged != existing.attributes:
+                    attrs_changed = True
                 existing.attributes = merged
 
             if entity_subtype and not existing.entity_subtype:
                 existing.entity_subtype = entity_subtype
+
+            # Regenerate embedding if attributes changed
+            if attrs_changed:
+                existing.embedding = await self._generate_embedding(
+                    self._entity_text(existing.canonical_name, existing.entity_type, existing.attributes)
+                )
 
             await db.flush()
             return existing
@@ -98,14 +125,20 @@ class STMManager:
         # Insert new
         clamped_confidence = max(CONFIDENCE_FLOOR, min(CONFIDENCE_CAP, confidence))
 
+        entity_attrs = attributes or {}
+        embedding = await self._generate_embedding(
+            self._entity_text(canonical_name, entity_type, entity_attrs)
+        )
+
         entity = STMEntity(
             chat_id=chat_id,
             entity_type=entity_type,
             entity_subtype=entity_subtype,
             canonical_name=canonical_name,
-            attributes=attributes or {},
+            attributes=entity_attrs,
             overall_confidence=clamped_confidence,
             mention_count=1,
+            embedding=embedding,
             first_mentioned=now,
             last_mentioned=now,
         )
@@ -170,10 +203,13 @@ class STMManager:
         start_msg_id: uuid.UUID | None = None,
         end_msg_id: uuid.UUID | None = None,
     ) -> STMRecap:
+        embedding = await self._generate_embedding(recap_text)
+
         recap = STMRecap(
             chat_id=chat_id,
             recap_text=recap_text,
             keywords=keywords,
+            embedding=embedding,
             confidence=confidence,
             entity_ids=entity_ids,
             relationship_ids=relationship_ids,

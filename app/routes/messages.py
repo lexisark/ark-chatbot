@@ -36,7 +36,8 @@ async def send_message(
     from context_engine.builder import ContextBuilder
     from providers.token_counter import TiktokenCounter
 
-    builder = ContextBuilder(token_counter=TiktokenCounter())
+    embedding_service = getattr(request.app.state, "embedding_service", None)
+    builder = ContextBuilder(token_counter=TiktokenCounter(), embedding_service=embedding_service)
     context = await builder.build_context(db, chat_id, current_message=body.content)
     system_instruction, llm_messages = builder.format_for_llm(context)
 
@@ -101,7 +102,8 @@ async def send_message_stream(
     from context_engine.builder import ContextBuilder
     from providers.token_counter import TiktokenCounter
 
-    builder = ContextBuilder(token_counter=TiktokenCounter())
+    embedding_service = getattr(request.app.state, "embedding_service", None)
+    builder = ContextBuilder(token_counter=TiktokenCounter(), embedding_service=embedding_service)
     context = await builder.build_context(db, chat_id, current_message=body.content)
     system_instruction, llm_messages = builder.format_for_llm(context)
 

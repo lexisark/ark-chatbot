@@ -78,6 +78,7 @@ class STMEntity(Base):
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     overall_confidence: Mapped[float] = mapped_column(Float, default=0.5)
     mention_count: Mapped[int] = mapped_column(Integer, default=1)
+    embedding = mapped_column(Vector(768), nullable=True)
     first_mentioned: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_mentioned: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -112,6 +113,7 @@ class STMRecap(Base):
     relationship_ids: Mapped[list | None] = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
     start_msg_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("message.id"), nullable=True)
     end_msg_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("message.id"), nullable=True)
+    embedding = mapped_column(Vector(768), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -148,6 +150,7 @@ class LTMEntity(Base):
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     overall_confidence: Mapped[float] = mapped_column(Float, default=0.5)
     mention_count: Mapped[int] = mapped_column(Integer, default=1)
+    embedding = mapped_column(Vector(768), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
