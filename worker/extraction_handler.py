@@ -25,16 +25,21 @@ async def run_batch_extraction(
     stm: STMManager,
     chat_id: uuid.UUID,
 ) -> None:
-    """Run batch extraction on recent messages with existing memory context.
+    """Run batch extraction on messages since last recap.
 
-    1. Load existing STM entities/relationships for dedup context
-    2. Load recent messages
-    3. Call LLM with extraction prompt (includes existing memory)
-    4. Parse structured output
-    5. Upsert entities/relationships via STMManager
-    6. Insert recap
+    1. Find last recap's end_msg_id to determine extraction window
+    2. Load only NEW messages (since last recap)
+    3. Load existing STM entities/relationships for dedup context
+    4. Call LLM with extraction prompt (includes existing memory)
+    5. Parse structured output, deduplicate
+    6. Upsert entities/relationships via STMManager
+    7. Insert recap with end_msg_id for next extraction
     """
-    messages = await get_chat_messages(db, chat_id, limit=100)
+    # Find last extraction position
+    last_recap_end_msg_id = await _get_last_recap_end_msg_id(stm, db, chat_id)
+
+    # Load only messages since last extraction
+    messages = await get_chat_messages(db, chat_id, limit=100, after_message_id=last_recap_end_msg_id)
     if not messages:
         return
 
@@ -129,7 +134,7 @@ async def run_batch_extraction(
             confidence=r.confidence,
         )
 
-    # Insert recap
+    # Insert recap with message range for tracking extraction position
     if extracted.recap:
         entity_ids = list(entity_map.values())
         await stm.insert_recap(
@@ -138,6 +143,8 @@ async def run_batch_extraction(
             keywords=extracted.recap.keywords,
             confidence=extracted.recap.confidence,
             entity_ids=entity_ids,
+            start_msg_id=messages[0].id,
+            end_msg_id=messages[-1].id,
         )
 
     await db.flush()
@@ -145,6 +152,16 @@ async def run_batch_extraction(
         f"Extraction complete for chat {chat_id}: "
         f"{len(extracted.entities)} entities, {len(extracted.relationships)} relationships"
     )
+
+
+async def _get_last_recap_end_msg_id(
+    stm: STMManager, db: AsyncSession, chat_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Get the end_msg_id of the most recent recap for this chat."""
+    recaps = await stm.get_recaps(db, chat_id, limit=1)
+    if recaps and recaps[0].end_msg_id:
+        return recaps[0].end_msg_id
+    return None
 
 
 async def _load_existing_entities(

@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
 from app.schemas import ChatCreate, ChatResponse, ChatUpdate
 from db import queries
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/chats", tags=["chats"])
 
 
 @router.post("", status_code=201, response_model=ChatResponse)
-async def create_chat(body: ChatCreate, db: AsyncSession = Depends(get_db)):
+async def create_chat(body: ChatCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    # Before creating new chat, trigger episode for previous chat in same scope
+    if body.scope_id:
+        await _trigger_episode_for_previous_chat(request, db, body.scope_id)
+
     chat = await queries.create_chat(
         db,
         title=body.title,
@@ -63,6 +70,98 @@ async def delete_chat(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if not deleted:
         raise HTTPException(status_code=404, detail="Chat not found")
     await db.commit()
+
+
+@router.post("/{chat_id}/complete")
+async def complete_chat(
+    chat_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a chat as complete and generate an LTM episode."""
+    chat = await queries.get_chat(db, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    from app.config import settings
+
+    # Check minimum message count
+    user_msg_count = await queries.count_user_messages(db, chat_id)
+    if user_msg_count < settings.final_episode_min_messages:
+        return {"episode_generated": False, "reason": f"Need at least {settings.final_episode_min_messages} user messages"}
+
+    # Generate episode
+    generated = await _generate_episode_for_chat(request, db, chat)
+    return {"episode_generated": generated}
+
+
+async def _generate_episode_for_chat(request: Request, db: AsyncSession, chat) -> bool:
+    """Generate an LTM episode for a chat."""
+    chat_provider = getattr(request.app.state, "chat_provider", None)
+    embedding_service = getattr(request.app.state, "embedding_service", None)
+
+    if not chat_provider or not embedding_service or not chat.scope_id:
+        return False
+
+    from context_engine.ltm_manager import LTMManager
+
+    ltm = LTMManager()
+    episode = await ltm.generate_episode(
+        db, chat_provider, embedding_service._provider, chat.id, chat.scope_id,
+    )
+    if episode:
+        await ltm.promote_entities(db, chat.id, chat.scope_id)
+        await ltm.promote_relationships(db, chat.id, chat.scope_id)
+        await ltm.apply_importance_decay(db, chat.scope_id)
+        await db.commit()
+        return True
+    return False
+
+
+async def _trigger_episode_for_previous_chat(
+    request: Request, db: AsyncSession, scope_id: str,
+) -> None:
+    """When creating a new chat, generate episode for the previous chat in the same scope."""
+    from app.config import settings
+
+    # Find the most recent chat in this scope
+    previous_chats = await queries.list_chats(db, limit=1, scope_id=scope_id)
+    if not previous_chats:
+        return
+
+    prev_chat = previous_chats[0]
+
+    # Check minimum messages
+    user_msg_count = await queries.count_user_messages(db, prev_chat.id)
+    if user_msg_count < settings.final_episode_min_messages:
+        return
+
+    # Check if episode already exists for this chat
+    from sqlalchemy import select
+    from db.models import LTMEpisode
+    existing = await db.execute(
+        select(LTMEpisode).where(
+            LTMEpisode.source_chat_id == prev_chat.id,
+            LTMEpisode.is_final == True,
+        ).limit(1)
+    )
+    if existing.scalar_one_or_none():
+        return  # Already has a final episode
+
+    # Generate episode async
+    from worker.in_process import InProcessQueue
+
+    queue = InProcessQueue()
+
+    async def _gen():
+        from db.session import async_session_factory
+        async with async_session_factory() as episode_db:
+            prev = await queries.get_chat(episode_db, prev_chat.id)
+            if prev:
+                await _generate_episode_for_chat(request, episode_db, prev)
+
+    await queue.enqueue("episode_generation", _gen)
+    logger.info(f"Queued episode generation for previous chat {prev_chat.id} in scope {scope_id}")
 
 
 def _to_response(chat) -> ChatResponse:

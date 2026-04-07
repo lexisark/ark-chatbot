@@ -103,6 +103,7 @@ async def get_chat_messages(
     chat_id: uuid.UUID,
     *,
     limit: int = 100,
+    after_message_id: uuid.UUID | None = None,
 ) -> list[Message]:
     stmt = (
         select(Message)
@@ -110,6 +111,11 @@ async def get_chat_messages(
         .order_by(Message.created_at.asc())
         .limit(limit)
     )
+    if after_message_id:
+        # Get the timestamp of the reference message, then filter after it
+        ref_msg = await db.get(Message, after_message_id)
+        if ref_msg:
+            stmt = stmt.where(Message.created_at > ref_msg.created_at)
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
