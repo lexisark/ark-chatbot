@@ -1,0 +1,44 @@
+[project]
+name = "ark-chatbot"
+version = "0.1.0"
+description = "Open-source conversational memory engine"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "tiktoken>=0.9",
+    "pgvector>=0.3",
+    "google-genai>=1.0",
+    "openai>=1.60",
+    "anthropic>=0.52",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "live: marks tests that hit live APIs (deselect with '-m \"not live\"')",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "providers", "context_engine", "db", "worker"]

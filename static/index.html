@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ark Chatbot</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>Ark Chatbot</h1>
+                <button id="new-chat-btn" class="btn-primary">+ New Chat</button>
+            </div>
+            <div id="chat-list" class="chat-list"></div>
+        </aside>
+
+        <!-- Main chat area -->
+        <main class="chat-area">
+            <!-- Empty state -->
+            <div id="empty-state" class="empty-state">
+                <h2>Start a conversation</h2>
+                <p>Create a new chat to get started.</p>
+            </div>
+
+            <!-- Chat view -->
+            <div id="chat-view" class="chat-view" style="display:none">
+                <header class="chat-header">
+                    <div>
+                        <h2 id="chat-title">Chat</h2>
+                        <span id="chat-scope" class="chat-scope"></span>
+                    </div>
+                    <div class="chat-actions">
+                        <button id="edit-prompt-btn" class="btn-ghost" title="Edit system prompt">System Prompt</button>
+                        <button id="delete-chat-btn" class="btn-danger" title="Delete chat">Delete</button>
+                    </div>
+                </header>
+
+                <div id="messages" class="messages"></div>
+
+                <div class="input-area">
+                    <textarea id="message-input" placeholder="Type a message..." rows="1"></textarea>
+                    <button id="send-btn" class="btn-primary">Send</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- New Chat Modal -->
+    <div id="new-chat-modal" class="modal" style="display:none">
+        <div class="modal-content">
+            <h2>New Chat</h2>
+            <label>Title</label>
+            <input type="text" id="modal-title" placeholder="My Chat">
+            <label>System Prompt</label>
+            <textarea id="modal-prompt" rows="4" placeholder="You are a helpful assistant..."></textarea>
+            <label>Scope ID <span class="hint">(groups chats for shared memory)</span></label>
+            <input type="text" id="modal-scope" placeholder="default">
+            <div class="modal-actions">
+                <button id="modal-cancel" class="btn-ghost">Cancel</button>
+                <button id="modal-create" class="btn-primary">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Prompt Modal -->
+    <div id="edit-prompt-modal" class="modal" style="display:none">
+        <div class="modal-content">
+            <h2>Edit System Prompt</h2>
+            <textarea id="edit-prompt-text" rows="6"></textarea>
+            <div class="modal-actions">
+                <button id="edit-prompt-cancel" class="btn-ghost">Cancel</button>
+                <button id="edit-prompt-save" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
