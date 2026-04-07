@@ -163,32 +163,59 @@ RULES FOR EXISTING MEMORY:
 
 Extract information that helps remember the USER better in future conversations.
 
-Output strict JSON:
+Output strict JSON with one or more entities, relationships, and a recap:
 {{
     "entities": [
         {{
-            "type": "pet|person|location|object|event|user|other",
-            "subtype": "dog|cat|friend|family|city|workplace|etc",
-            "canonical_name": "Max",
-            "attributes": {{"breed": "Golden Retriever", "age": "3 years"}},
-            "attribute_confidence": {{"breed": 0.95, "age": 0.80}},
-            "overall_confidence": 0.92,
-            "tags": ["pet", "dog"],
-            "evidence": "User said 'my golden retriever Max is 3 years old'"
+            "type": "person",
+            "subtype": "colleague",
+            "canonical_name": "Sarah",
+            "attributes": {{"role": "manager", "department": "engineering"}},
+            "attribute_confidence": {{"role": 0.90, "department": 0.80}},
+            "overall_confidence": 0.88,
+            "tags": ["work", "colleague"],
+            "evidence": "User said 'my manager Sarah in engineering'"
+        }},
+        {{
+            "type": "location",
+            "subtype": "city",
+            "canonical_name": "Seattle",
+            "attributes": {{"context": "home city", "duration": "5 years"}},
+            "attribute_confidence": {{"context": 0.93, "duration": 0.85}},
+            "overall_confidence": 0.90,
+            "tags": ["location", "home"],
+            "evidence": "User said 'I've lived in Seattle for 5 years'"
+        }},
+        {{
+            "type": "event",
+            "subtype": "planned",
+            "canonical_name": "Japan Trip",
+            "attributes": {{"when": "next summer", "who": "with partner"}},
+            "attribute_confidence": {{"when": 0.85, "who": 0.80}},
+            "overall_confidence": 0.82,
+            "tags": ["travel", "plans"],
+            "evidence": "User mentioned planning a trip to Japan next summer"
         }}
     ],
     "relationships": [
         {{
             "subject": "user",
-            "predicate": "owns|loves|lives_in|works_at|friends_with|etc",
-            "object_name": "Max",
-            "confidence": 0.90,
-            "evidence": "User said 'I have a dog'"
+            "predicate": "works_with",
+            "object_name": "Sarah",
+            "confidence": 0.88,
+            "evidence": "User said 'my manager Sarah'"
+        }},
+        {{
+            "subject": "user",
+            "predicate": "lives_in",
+            "object_name": "Seattle",
+            "confidence": 0.93,
+            "evidence": "User said 'I've lived in Seattle'"
         }}
     ],
-    "recap_text": "2-4 sentence summary of key information exchanged",
-    "keywords": ["Max", "golden retriever", "dog", "park"],
-    "tags": ["pet_care", "introduction"]
+    "recap_text": "User works in engineering under manager Sarah. Lives in Seattle for 5 years. Planning a trip to Japan next summer with their partner.",
+    "keywords": ["Sarah", "manager", "engineering", "Seattle", "Japan", "trip", "partner"],
+    "tags": ["work", "location", "travel"]
 }}
 
 CONFIDENCE SCORING (CRITICAL - Follow Exactly):
@@ -196,51 +223,69 @@ CONFIDENCE SCORING (CRITICAL - Follow Exactly):
 NEVER use 1.0 confidence. Maximum is 0.95.
 
 0.90-0.95: DIRECT QUOTE with zero ambiguity
-  "My dog's name is Max" → pet_name=Max (0.95)
+  "I live in Seattle" → lives_in=Seattle (0.93)
+  "My name is Alex" → name=Alex (0.95)
 
 0.75-0.89: EXPLICITLY STATED but paraphrased
-  "I have a dog named Max" → has_dog=True (0.85)
+  "I work at Google" → employer=Google (0.85)
+  "Sarah is my manager" → relationship=manager (0.88)
 
 0.60-0.74: STRONGLY IMPLIED by context
-  "Max loves fetch" (implies has_dog) → has_dog=True (0.70)
+  "I need to pick up the kids" (implies has children) → has_children=True (0.70)
+  "The usual coffee shop" (implies regular habit) → frequents=coffee_shop (0.65)
 
 0.45-0.59: WEAKLY IMPLIED or uncertain
-  "Maybe I'll get a dog" → wants_dog=maybe (0.55)
+  "Maybe I'll switch jobs" → considering_job_change=True (0.55)
 
 0.30-0.44: GUESS or highly uncertain — use sparingly
 
 ENTITY TYPES (use ONLY these):
-  user: The user themselves (preferences, characteristics, occupation)
-  pet: Any animal (dog, cat, bird, fish, etc.)
-  person: Other people (friend, family_member, partner, colleague)
-  location: Places (city, workplace, home, landmark)
-  object: Possessions (car, phone, hobby items)
-  event: Significant occurrences (planned or past)
-  other: Anything else important
+  person: People the user knows (friend, family, partner, colleague, neighbor)
+  location: Places (city, country, workplace, school, restaurant, neighborhood)
+  object: Things (car, phone, book, instrument, tool, possession)
+  event: Occurrences past or planned (trip, wedding, meeting, birthday, project)
+  pet: Animals (dog, cat, bird, fish, horse, etc.)
+  user: The user themselves (their own preferences, traits, occupation, habits)
+  other: Anything else notable (organization, hobby, skill, interest)
+
+ENTITY SUBTYPES (be specific):
+  person → friend, family, partner, spouse, child, parent, sibling, colleague, manager, neighbor, teacher
+  location → city, country, workplace, school, home, restaurant, park, gym, neighborhood, store
+  object → vehicle, device, instrument, book, tool, clothing, furniture, food
+  event → trip, wedding, birthday, meeting, project, deadline, appointment, holiday, concert
+  pet → dog, cat, bird, fish, rabbit, horse, reptile
+  user → self
 
 ENTITY RULES:
-- Create ONE entity per distinct thing
-- Use canonical_name for primary identification
+- Create ONE entity per distinct thing mentioned
+- Use canonical_name for primary identification (proper name or descriptive label)
 - Put ALL information as attributes in the attributes dict
 - Track confidence per attribute in attribute_confidence
-- Use relationships to connect entities
+- Use relationships to connect entities to each other and to the user
 - DO NOT create entities for the assistant/AI character
-- DO NOT use pronouns as canonical_name (never "he", "she", "it")
+- DO NOT use pronouns as canonical_name (never "he", "she", "it", "they")
 - Canonical names must be at least 2 characters
 
-RELATIONSHIP RULES:
-- subject: "user" OR entity canonical_name
-- predicate: owns, loves, likes, lives_in, works_at, friends_with, etc.
-- object_name: entity canonical_name
+RELATIONSHIP PREDICATES (use descriptive verbs):
+  works_at, works_with, manages, reports_to
+  lives_in, lives_with, moved_to, visits
+  owns, drives, plays, studies, practices
+  friends_with, married_to, parent_of, sibling_of, dating
+  likes, dislikes, prefers, interested_in
+  plans_to, attending, organizing, participating_in
 
 WHAT TO EXTRACT:
-- Facts about the USER: life, family, pets, location, occupation, hobbies
-- User preferences: communication style, interests, behavioral patterns
-- Information from user messages and user-shared images
+- People in the user's life: family, friends, colleagues, partners
+- Places: where they live, work, travel, frequent
+- Things they own, use, or care about
+- Events: past experiences, upcoming plans, milestones
+- Pets and animals
+- The user's own traits: occupation, hobbies, interests, preferences, habits
 
 WHAT NOT TO EXTRACT:
 - Facts about the ASSISTANT/AI (ignore assistant's self-descriptions)
-- Assistant's opinions or responses as facts
+- Assistant's opinions, reactions, or responses
+- Generic small talk with no factual content
 
 REINFORCEMENT:
 - Extract ALL facts mentioned in THIS conversation, even if mentioned before
