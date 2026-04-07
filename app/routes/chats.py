@@ -91,15 +91,14 @@ async def complete_chat(
         return {"episode_generated": False, "reason": f"Need at least {settings.final_episode_min_messages} user messages"}
 
     # Generate episode
-    generated = await _generate_episode_for_chat(request, db, chat)
+    chat_provider = getattr(request.app.state, "chat_provider", None)
+    embedding_service = getattr(request.app.state, "embedding_service", None)
+    generated = await _generate_episode_for_chat(chat_provider, embedding_service, db, chat)
     return {"episode_generated": generated}
 
 
-async def _generate_episode_for_chat(request: Request, db: AsyncSession, chat) -> bool:
+async def _generate_episode_for_chat(chat_provider, embedding_service, db: AsyncSession, chat) -> bool:
     """Generate an LTM episode for a chat."""
-    chat_provider = getattr(request.app.state, "chat_provider", None)
-    embedding_service = getattr(request.app.state, "embedding_service", None)
-
     if not chat_provider or not embedding_service or not chat.scope_id:
         return False
 
@@ -114,6 +113,7 @@ async def _generate_episode_for_chat(request: Request, db: AsyncSession, chat) -
         await ltm.promote_relationships(db, chat.id, chat.scope_id)
         await ltm.apply_importance_decay(db, chat.scope_id)
         await db.commit()
+        logger.info(f"Episode generated for chat {chat.id} in scope {chat.scope_id}")
         return True
     return False
 
@@ -134,6 +134,7 @@ async def _trigger_episode_for_previous_chat(
     # Check minimum messages
     user_msg_count = await queries.count_user_messages(db, prev_chat.id)
     if user_msg_count < settings.final_episode_min_messages:
+        logger.debug(f"Previous chat {prev_chat.id} has {user_msg_count} user msgs, need {settings.final_episode_min_messages}")
         return
 
     # Check if episode already exists for this chat
@@ -148,6 +149,16 @@ async def _trigger_episode_for_previous_chat(
     if existing.scalar_one_or_none():
         return  # Already has a final episode
 
+    # Capture providers from app state before async task
+    chat_provider = getattr(request.app.state, "chat_provider", None)
+    embedding_service = getattr(request.app.state, "embedding_service", None)
+
+    if not chat_provider or not embedding_service:
+        logger.warning("Cannot generate episode: missing chat_provider or embedding_service on app state")
+        return
+
+    prev_chat_id = prev_chat.id
+
     # Generate episode async
     from worker.in_process import InProcessQueue
 
@@ -156,12 +167,12 @@ async def _trigger_episode_for_previous_chat(
     async def _gen():
         from db.session import async_session_factory
         async with async_session_factory() as episode_db:
-            prev = await queries.get_chat(episode_db, prev_chat.id)
+            prev = await queries.get_chat(episode_db, prev_chat_id)
             if prev:
-                await _generate_episode_for_chat(request, episode_db, prev)
+                await _generate_episode_for_chat(chat_provider, embedding_service, episode_db, prev)
 
     await queue.enqueue("episode_generation", _gen)
-    logger.info(f"Queued episode generation for previous chat {prev_chat.id} in scope {scope_id}")
+    logger.info(f"Queued episode generation for previous chat {prev_chat_id} in scope {scope_id}")
 
 
 def _to_response(chat) -> ChatResponse:

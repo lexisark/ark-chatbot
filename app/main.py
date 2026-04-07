@@ -34,6 +34,24 @@ async def lifespan(app: FastAPI):
 
     app.state.chat_provider = registry.create_chat(settings.chat_provider, **provider_kwargs)
 
+    # Initialize embedding provider + service
+    embedding_kwargs = {}
+    if settings.embedding_provider == "gemini":
+        embedding_kwargs = {
+            "project_id": settings.gcp_project_id,
+            "region": settings.gcp_region,
+            "default_model": settings.embedding_model,
+        }
+    elif settings.embedding_provider == "openai":
+        embedding_kwargs = {"api_key": settings.openai_api_key, "default_model": settings.embedding_model}
+
+    try:
+        embedding_provider = registry.create_embedding(settings.embedding_provider, **embedding_kwargs)
+        from context_engine.embedding_service import EmbeddingService
+        app.state.embedding_service = EmbeddingService(embedding_provider)
+    except KeyError:
+        app.state.embedding_service = None
+
     yield
 
     from db.session import dispose_db
