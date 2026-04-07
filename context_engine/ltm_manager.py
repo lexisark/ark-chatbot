@@ -37,28 +37,46 @@ class LTMManager:
         chat_id: uuid.UUID,
         scope_id: str,
     ) -> LTMEpisode | None:
-        """Generate an LTM episode from a chat's STM data."""
+        """Generate an LTM episode from a chat's STM data + recent messages."""
+        from db.queries import get_chat_messages
 
         stm = STMManager()
         entities = await stm.get_entities(db, chat_id, min_confidence=0.0)
-        recaps = await stm.get_recaps(db, chat_id, limit=20)
+        relationships = await stm.get_relationships(db, chat_id, min_confidence=0.0)
+        recaps = await stm.get_recaps(db, chat_id, limit=100)  # all recaps
+        messages = await get_chat_messages(db, chat_id, limit=10)  # last 10 messages
 
-        if not entities and not recaps:
+        if not entities and not recaps and not messages:
             return None
 
         # Build context for episode generation
         context_parts = []
+
+        if messages:
+            context_parts.append("Recent conversation:")
+            for m in messages:
+                context_parts.append(f"  {m.role.value.upper()}: {m.content}")
+
         if entities:
-            context_parts.append("Entities from this conversation:")
-            for e in entities:
+            context_parts.append("\nEntities from this conversation:")
+            for e in entities[:50]:
                 line = f"- {e.canonical_name} ({e.entity_type})"
                 if e.attributes:
                     attrs = ", ".join(f"{k}: {v}" for k, v in e.attributes.items())
                     line += f" — {attrs}"
                 context_parts.append(line)
 
+        if relationships:
+            context_parts.append("\nRelationships:")
+            for r in relationships[:30]:
+                subj = await db.get(STMEntity, r.subject_entity_id)
+                obj = await db.get(STMEntity, r.object_entity_id)
+                subj_name = subj.canonical_name if subj else "?"
+                obj_name = obj.canonical_name if obj else "?"
+                context_parts.append(f"- {subj_name} {r.predicate} {obj_name}")
+
         if recaps:
-            context_parts.append("\nConversation recaps:")
+            context_parts.append("\nConversation summaries:")
             for r in recaps:
                 context_parts.append(f"- {r.recap_text}")
 
@@ -66,7 +84,8 @@ class LTMManager:
 
         # Call LLM to generate episode narrative
         prompt = f"""Summarize this conversation into a rich narrative episode (200-300 tokens).
-Include key entities, what was discussed, and the emotional tone.
+Include key entities, relationships, what was discussed, and the emotional tone.
+This episode will be used to recall this conversation in the future.
 
 {context}
 

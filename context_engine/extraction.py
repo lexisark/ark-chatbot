@@ -72,9 +72,10 @@ class ExtractedData:
 def build_existing_memory_block(
     entities: list[dict],
     relationships: list[dict],
+    recaps: list[dict] | None = None,
 ) -> str:
-    """Format existing STM entities/relationships for the extraction prompt."""
-    if not entities and not relationships:
+    """Format existing STM entities/relationships/recaps for the extraction prompt."""
+    if not entities and not relationships and not recaps:
         return ""
 
     parts = []
@@ -104,6 +105,11 @@ def build_existing_memory_block(
             conf = r.get("confidence", 0.5)
             parts.append(f"  - {subj} → {pred} → {obj} [confidence: {conf:.2f}]")
 
+    if recaps:
+        parts.append("Previous summaries:")
+        for rc in recaps:
+            parts.append(f"  - {rc['recap_text']}")
+
     return "\n".join(parts)
 
 
@@ -115,6 +121,7 @@ def build_extraction_prompt(
     *,
     existing_entities: list[dict] | None = None,
     existing_relationships: list[dict] | None = None,
+    existing_recaps: list[dict] | None = None,
 ) -> str:
     """Build extraction prompt with optional existing memory context."""
 
@@ -124,9 +131,10 @@ def build_extraction_prompt(
 
     # Build existing memory section
     memory_section = ""
-    if existing_entities or existing_relationships:
+    if existing_entities or existing_relationships or existing_recaps:
         memory_block = build_existing_memory_block(
             existing_entities or [], existing_relationships or [],
+            existing_recaps or [],
         )
         memory_section = f"""
 ## EXISTING MEMORY FOR THIS CONVERSATION
@@ -251,11 +259,17 @@ Return ONLY the JSON, no other text."""
 def parse_extraction_response(raw: str) -> ExtractedData:
     """Parse LLM extraction output into structured data."""
 
-    # Strip markdown code blocks
+    # Strip markdown code blocks (closed or truncated)
     cleaned = raw.strip()
+    # Try closed code block first
     match = re.search(r"```(?:json)?\s*\n?(.*?)```", cleaned, re.DOTALL)
     if match:
         cleaned = match.group(1).strip()
+    else:
+        # Try truncated code block (no closing ```)
+        match = re.search(r"```(?:json)?\s*\n?(.*)", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
 
     # Try finding JSON object in text
     if not cleaned.startswith("{"):
@@ -266,8 +280,13 @@ def parse_extraction_response(raw: str) -> ExtractedData:
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
-        logger.warning(f"Failed to parse extraction response: {raw[:200]}")
-        return ExtractedData()
+        # Try to repair truncated JSON by closing brackets
+        repaired = _try_repair_json(cleaned)
+        if repaired is not None:
+            data = repaired
+        else:
+            logger.warning(f"Failed to parse extraction response: {raw[:200]}")
+            return ExtractedData()
 
     # Validate and clean
     data = validate_extraction(data)
@@ -359,6 +378,33 @@ def validate_extraction(data: dict) -> dict:
     data["relationships"] = valid_rels
 
     return data
+
+
+def _try_repair_json(text: str) -> dict | None:
+    """Try to repair truncated JSON by closing open brackets/braces."""
+    if not text or not text.startswith("{"):
+        return None
+
+    # Try progressively closing brackets
+    for suffix in ["}", "]}", "]}}", "]}]}", '"}]}'  , '"}}', '"]}}']:
+        try:
+            return json.loads(text + suffix)
+        except json.JSONDecodeError:
+            continue
+
+    # Try truncating to last complete entity in the entities array
+    # Find last complete object boundary
+    last_brace = text.rfind("}")
+    if last_brace > 0:
+        truncated = text[:last_brace + 1]
+        # Close the arrays and outer object
+        for suffix in ["]}", "]}",  "]}", '"]}']:
+            try:
+                return json.loads(truncated + suffix)
+            except json.JSONDecodeError:
+                continue
+
+    return None
 
 
 def _clamp_confidence(value: float) -> float:

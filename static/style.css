@@ -22,17 +22,21 @@
     --sidebar-width: 280px;
 }
 
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
-    height: 100vh;
-    overflow: hidden;
 }
 
 .app {
     display: flex;
-    height: 100vh;
+    height: 100%;
+    overflow: hidden;
 }
 
 /* Sidebar */
@@ -102,6 +106,8 @@ body {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .empty-state {
@@ -120,9 +126,11 @@ body {
 }
 
 .chat-view {
+    position: relative;
     flex: 1;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .chat-header {
@@ -132,6 +140,7 @@ body {
     justify-content: space-between;
     align-items: center;
     background: var(--bg-secondary);
+    flex-shrink: 0;
 }
 
 .chat-header h2 {
@@ -149,10 +158,11 @@ body {
     gap: 8px;
 }
 
-/* Messages */
+/* Messages — uses flex: 1 with explicit overflow */
 .messages {
-    flex: 1;
+    flex: 1 1 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -202,6 +212,7 @@ body {
     display: flex;
     gap: 8px;
     background: var(--bg-secondary);
+    flex-shrink: 0;
 }
 
 .input-area textarea {

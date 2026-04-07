@@ -38,29 +38,31 @@ async def run_batch_extraction(
     # Find last extraction position
     last_recap_end_msg_id = await _get_last_recap_end_msg_id(stm, db, chat_id)
 
-    # Load only messages since last extraction
-    messages = await get_chat_messages(db, chat_id, limit=100, after_message_id=last_recap_end_msg_id)
+    # Load only messages since last extraction (max 10: 5 user + 5 assistant)
+    messages = await get_chat_messages(db, chat_id, limit=10, after_message_id=last_recap_end_msg_id)
     if not messages:
         return
 
     llm_messages = [{"role": m.role.value, "content": m.content} for m in messages]
 
-    # Load existing STM for dedup context
-    existing_entities = await _load_existing_entities(stm, db, chat_id)
-    existing_relationships = await _load_existing_relationships(stm, db, chat_id)
+    # Load existing STM for dedup context (capped to avoid blowing context window)
+    existing_entities = await _load_existing_entities(stm, db, chat_id, limit=50)
+    existing_relationships = await _load_existing_relationships(stm, db, chat_id, limit=30)
+    existing_recaps = await _load_existing_recaps(stm, db, chat_id, limit=7)
 
     # Build extraction prompt with memory context
     prompt = build_extraction_prompt(
         llm_messages,
         existing_entities=existing_entities,
         existing_relationships=existing_relationships,
+        existing_recaps=existing_recaps,
     )
 
-    # Call LLM
+    # Call LLM — needs enough tokens for structured JSON output
     response = await chat_provider.chat(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
-        max_tokens=2000,
+        max_tokens=4096,
     )
 
     # Parse response
@@ -165,9 +167,9 @@ async def _get_last_recap_end_msg_id(
 
 
 async def _load_existing_entities(
-    stm: STMManager, db: AsyncSession, chat_id: uuid.UUID,
+    stm: STMManager, db: AsyncSession, chat_id: uuid.UUID, limit: int = 50,
 ) -> list[dict]:
-    """Load existing STM entities formatted for the extraction prompt."""
+    """Load top entities by confidence for the extraction prompt."""
     entities = await stm.get_entities(db, chat_id, min_confidence=0.0)
     return [
         {
@@ -177,19 +179,19 @@ async def _load_existing_entities(
             "attributes": e.attributes,
             "confidence": e.overall_confidence,
         }
-        for e in entities
+        for e in entities[:limit]
     ]
 
 
 async def _load_existing_relationships(
-    stm: STMManager, db: AsyncSession, chat_id: uuid.UUID,
+    stm: STMManager, db: AsyncSession, chat_id: uuid.UUID, limit: int = 30,
 ) -> list[dict]:
-    """Load existing STM relationships formatted for the extraction prompt."""
+    """Load top relationships by confidence for the extraction prompt."""
     from db.models import STMEntity
 
     relationships = await stm.get_relationships(db, chat_id, min_confidence=0.0)
     result = []
-    for r in relationships:
+    for r in relationships[:limit]:
         subj = await db.get(STMEntity, r.subject_entity_id)
         obj = await db.get(STMEntity, r.object_entity_id)
         if subj and obj:
@@ -200,3 +202,17 @@ async def _load_existing_relationships(
                 "confidence": r.confidence,
             })
     return result
+
+
+async def _load_existing_recaps(
+    stm: STMManager, db: AsyncSession, chat_id: uuid.UUID, limit: int = 5,
+) -> list[dict]:
+    """Load most recent recaps for the extraction prompt."""
+    recaps = await stm.get_recaps(db, chat_id, limit=limit)
+    return [
+        {
+            "recap_text": r.recap_text,
+            "keywords": r.keywords,
+        }
+        for r in recaps
+    ]
