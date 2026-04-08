@@ -178,7 +178,7 @@ final_score  = score_hybrid × hybrid + score_confidence × confidence + score_r
 ```
 
 Default weights (configurable):
-- FTS weight: 0.7, Vector weight: 0.3
+- Vector weight: 0.7, FTS weight: 0.3
 - Final: 0.4 hybrid + 0.3 confidence + 0.3 recency
 
 ### Why Hybrid?

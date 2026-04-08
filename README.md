@@ -90,8 +90,8 @@ LONG-TERM MEMORY (LTM) — per scope (cross-chat)
 ```
 
 **Hybrid Search** — every RAG query searches across all tiers using:
-- FTS keyword matching (70% weight)
-- Vector cosine similarity (30% weight)
+- Vector cosine similarity (70% weight)
+- FTS keyword matching (30% weight)
 - Adaptive recency scoring (mention frequency + confidence decay)
 - Context window dedup (excludes memories already visible in recent messages)
 
@@ -207,8 +207,8 @@ STM_MAX_CONFIDENCE=0.95        # Never reach 1.0
 
 **RAG Scoring** — how memories are ranked:
 ```env
-RAG_HYBRID_FTS_WEIGHT=0.7      # Keyword match weight
-RAG_HYBRID_VECTOR_WEIGHT=0.3   # Semantic similarity weight
+RAG_HYBRID_FTS_WEIGHT=0.3      # Keyword match weight
+RAG_HYBRID_VECTOR_WEIGHT=0.7   # Semantic similarity weight
 RAG_SCORE_HYBRID_WEIGHT=0.4    # Match score in final ranking
 RAG_SCORE_CONFIDENCE_WEIGHT=0.3  # Confidence in final ranking
 RAG_SCORE_RECENCY_WEIGHT=0.3   # Recency in final ranking

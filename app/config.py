@@ -62,8 +62,8 @@ class Settings(BaseSettings):
 
     # ── RAG Retrieval ─────────────────────────────────────
     rag_search_timeout: float = 1.0         # Search timeout (seconds)
-    rag_hybrid_fts_weight: float = 0.7      # FTS weight in hybrid scoring
-    rag_hybrid_vector_weight: float = 0.3   # Vector weight in hybrid scoring
+    rag_hybrid_fts_weight: float = 0.3      # FTS weight in hybrid scoring
+    rag_hybrid_vector_weight: float = 0.7   # Vector weight in hybrid scoring
     rag_vector_distance_threshold: float = 0.6  # Max cosine distance for vector matches
     rag_max_keywords: int = 10              # Max keywords extracted from query
 
