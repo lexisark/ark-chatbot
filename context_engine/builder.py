@@ -60,7 +60,7 @@ class ContextBuilder:
 
         # Step 2: Recent messages (50% of budget)
         recent_budget = int(budget_tokens * BUILDER_CONFIG["recent_messages_budget_ratio"])
-        messages = await get_chat_messages(db, chat_id, limit=100)
+        messages = await get_chat_messages(db, chat_id, limit=BUILDER_CONFIG["recent_messages_limit"])
 
         llm_messages = [{"role": m.role.value, "content": m.content} for m in messages]
         result.recent_messages = self.tokens.fit_messages_to_budget(llm_messages, recent_budget)

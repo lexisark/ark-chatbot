@@ -10,7 +10,7 @@ from datetime import datetime
 from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from context_engine.config import RAG_CONFIG
+from context_engine.config import RAG_CONFIG, STM_CONFIG
 from context_engine.models import YouRememberBlock
 from context_engine.tokens import TokenHelper
 from db.models import LTMEntity, LTMEpisode, STMEntity, STMRecap, STMRelationship
@@ -27,7 +27,9 @@ _STOP_WORDS = frozenset(
 )
 
 
-def _extract_keywords(query: str, max_keywords: int = 10) -> list[str]:
+def _extract_keywords(query: str, max_keywords: int | None = None) -> list[str]:
+    if max_keywords is None:
+        max_keywords = RAG_CONFIG.get("max_keywords", 10)
     """Extract keywords from a query string, filtering stop words."""
     words = query.lower().split()
     keywords = [w.strip(".,!?;:'\"()[]{}") for w in words]
@@ -51,12 +53,6 @@ def _cosine_distance_to_score(distance: float) -> float:
 
 # ── Recency scoring ────────────────────────────────────
 
-# Config defaults (from RAG_CONFIG where available)
-_BASE_HALF_LIFE_HOURS = 72  # 3 days
-_MENTION_FACTOR = 0.2       # Per-mention multiplier for half-life
-_MENTION_CAP = 5            # Max mentions factored in
-_CONFIDENCE_FACTOR = 0.5    # Confidence contribution to half-life
-
 
 def recency_score(
     last_mentioned: datetime,
@@ -65,21 +61,22 @@ def recency_score(
 ) -> float:
     """Adaptive recency score with mention and confidence factors.
 
-    Higher mention_count → slower decay (entity is important).
-    Higher confidence → slower decay (entity is well-established).
-
-    Formula:
-        effective_half_life = base * (1 + mention_factor * min(mentions, cap)) * (1 + confidence_factor * confidence)
-        score = 0.5 ^ (age_hours / effective_half_life)
+    All parameters configurable via RECENCY_CONFIG (from .env).
     """
+    from context_engine.config import RECENCY_CONFIG
     from datetime import timezone as tz
+
     now = datetime.now(tz.utc)
     age_hours = max(0.0, (now - last_mentioned).total_seconds() / 3600)
 
-    # Adaptive half-life
-    mention_mult = 1.0 + _MENTION_FACTOR * min(mention_count, _MENTION_CAP)
-    confidence_mult = 1.0 + _CONFIDENCE_FACTOR * confidence
-    effective_half_life = _BASE_HALF_LIFE_HOURS * mention_mult * confidence_mult
+    base = RECENCY_CONFIG["base_half_life_hours"]
+    m_factor = RECENCY_CONFIG["mention_factor"]
+    m_cap = RECENCY_CONFIG["mention_cap"]
+    c_factor = RECENCY_CONFIG["confidence_factor"]
+
+    mention_mult = 1.0 + m_factor * min(mention_count, m_cap)
+    confidence_mult = 1.0 + c_factor * confidence
+    effective_half_life = base * mention_mult * confidence_mult
 
     return math.pow(0.5, age_hours / effective_half_life)
 
@@ -89,9 +86,12 @@ class RAGManager:
 
     def __init__(self, tokens: TokenHelper):
         self.tokens = tokens
-        self._fts_weight = RAG_CONFIG.get("hybrid_fts_weight", 0.7)
-        self._vector_weight = RAG_CONFIG.get("hybrid_vector_weight", 0.3)
-        self._vector_threshold = RAG_CONFIG.get("episode_vector_distance_threshold", 0.6)
+        self._fts_weight = RAG_CONFIG["hybrid_fts_weight"]
+        self._vector_weight = RAG_CONFIG["hybrid_vector_weight"]
+        self._vector_threshold = RAG_CONFIG["vector_distance_threshold"]
+        self._score_hybrid = RAG_CONFIG["score_hybrid_weight"]
+        self._score_confidence = RAG_CONFIG["score_confidence_weight"]
+        self._score_recency = RAG_CONFIG["score_recency_weight"]
 
     async def build_you_remember(
         self,
@@ -183,8 +183,8 @@ class RAGManager:
         Excludes entities first_mentioned within the context window."""
         stmt = (
             select(STMEntity)
-            .where(STMEntity.chat_id == chat_id, STMEntity.overall_confidence >= 0.30)
-            .limit(50)
+            .where(STMEntity.chat_id == chat_id, STMEntity.overall_confidence >= STM_CONFIG["min_confidence_threshold"])
+            .limit(RAG_CONFIG["stm_entity_limit"])
         )
         if context_window_start:
             stmt = stmt.where(STMEntity.first_mentioned < context_window_start)
@@ -210,8 +210,7 @@ class RAGManager:
             # Recency score
             rec_score = recency_score(e.last_mentioned, e.mention_count, e.overall_confidence)
 
-            # Final: 40% hybrid match + 30% confidence + 30% recency
-            final_score = 0.4 * hybrid + 0.3 * e.overall_confidence + 0.3 * rec_score
+            final_score = self._score_hybrid * hybrid + self._score_confidence * e.overall_confidence + self._score_recency * rec_score
 
             scored.append({"entity": e, "score": final_score})
 
@@ -228,7 +227,7 @@ class RAGManager:
             select(STMRecap)
             .where(STMRecap.chat_id == chat_id)
             .order_by(STMRecap.created_at.desc())
-            .limit(10)
+            .limit(RAG_CONFIG["stm_recap_limit"])
         )
         if context_window_start:
             stmt = stmt.where(STMRecap.created_at < context_window_start)
@@ -253,7 +252,7 @@ class RAGManager:
             # Recency for recaps (use created_at, mention_count=1)
             rec_score = recency_score(r.created_at, mention_count=1, confidence=r.confidence)
 
-            final_score = 0.4 * hybrid + 0.3 * r.confidence + 0.3 * rec_score
+            final_score = self._score_hybrid * hybrid + self._score_confidence * r.confidence + self._score_recency * rec_score
 
             scored.append({"recap": r, "score": final_score})
 
@@ -272,7 +271,7 @@ class RAGManager:
                 LTMEpisode.source_chat_id != exclude_chat_id,
             )
             .order_by(LTMEpisode.importance_score.desc())
-            .limit(20)
+            .limit(RAG_CONFIG["ltm_episode_limit"])
         )
         result = await db.execute(stmt)
         episodes = list(result.scalars().all())
@@ -307,8 +306,8 @@ class RAGManager:
         """Hybrid search LTM entities."""
         stmt = (
             select(LTMEntity)
-            .where(LTMEntity.scope_id == scope_id, LTMEntity.overall_confidence >= 0.30)
-            .limit(50)
+            .where(LTMEntity.scope_id == scope_id, LTMEntity.overall_confidence >= STM_CONFIG["min_confidence_threshold"])
+            .limit(RAG_CONFIG["ltm_entity_limit"])
         )
         result = await db.execute(stmt)
         entities = list(result.scalars().all())
@@ -337,9 +336,9 @@ class RAGManager:
     ) -> list[STMRelationship]:
         stmt = (
             select(STMRelationship)
-            .where(STMRelationship.chat_id == chat_id, STMRelationship.confidence >= 0.30)
+            .where(STMRelationship.chat_id == chat_id, STMRelationship.confidence >= STM_CONFIG["min_confidence_threshold"])
             .order_by(STMRelationship.confidence.desc())
-            .limit(30)
+            .limit(RAG_CONFIG["stm_relationship_limit"])
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())

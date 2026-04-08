@@ -38,17 +38,22 @@ async def run_batch_extraction(
     # Find last extraction position
     last_recap_end_msg_id = await _get_last_recap_end_msg_id(stm, db, chat_id)
 
-    # Load only messages since last extraction (max 10: 5 user + 5 assistant)
-    messages = await get_chat_messages(db, chat_id, limit=10, after_message_id=last_recap_end_msg_id)
+    from context_engine.config import EXTRACTION_CONFIG
+
+    # Load only messages since last extraction
+    messages = await get_chat_messages(
+        db, chat_id, limit=EXTRACTION_CONFIG["message_limit"],
+        after_message_id=last_recap_end_msg_id,
+    )
     if not messages:
         return
 
     llm_messages = [{"role": m.role.value, "content": m.content} for m in messages]
 
     # Load existing STM for dedup context (capped to avoid blowing context window)
-    existing_entities = await _load_existing_entities(stm, db, chat_id, limit=50)
-    existing_relationships = await _load_existing_relationships(stm, db, chat_id, limit=30)
-    existing_recaps = await _load_existing_recaps(stm, db, chat_id, limit=7)
+    existing_entities = await _load_existing_entities(stm, db, chat_id, limit=EXTRACTION_CONFIG["entity_context"])
+    existing_relationships = await _load_existing_relationships(stm, db, chat_id, limit=EXTRACTION_CONFIG["relationship_context"])
+    existing_recaps = await _load_existing_recaps(stm, db, chat_id, limit=EXTRACTION_CONFIG["recap_context"])
 
     # Build extraction prompt with memory context
     prompt = build_extraction_prompt(
@@ -61,8 +66,8 @@ async def run_batch_extraction(
     # Call LLM — needs enough tokens for structured JSON output
     response = await chat_provider.chat(
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-        max_tokens=4096,
+        temperature=EXTRACTION_CONFIG["temperature"],
+        max_tokens=EXTRACTION_CONFIG["max_tokens"],
     )
 
     # Parse response

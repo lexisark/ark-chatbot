@@ -24,7 +24,9 @@ from providers.base import ChatProvider, EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
-EPISODE_DECAY_HALF_LIFE_DAYS = 7
+from context_engine.config import LTM_EPISODE_CONFIG
+
+EPISODE_DECAY_HALF_LIFE_DAYS = LTM_EPISODE_CONFIG["decay_half_life_days"]
 
 
 class LTMManager:
@@ -43,8 +45,8 @@ class LTMManager:
         stm = STMManager()
         entities = await stm.get_entities(db, chat_id, min_confidence=0.0)
         relationships = await stm.get_relationships(db, chat_id, min_confidence=0.0)
-        recaps = await stm.get_recaps(db, chat_id, limit=100)  # all recaps
-        messages = await get_chat_messages(db, chat_id, limit=10)  # last 10 messages
+        recaps = await stm.get_recaps(db, chat_id, limit=100)
+        messages = await get_chat_messages(db, chat_id, limit=LTM_EPISODE_CONFIG["messages_context"])
 
         if not entities and not recaps and not messages:
             return None
@@ -59,7 +61,7 @@ class LTMManager:
 
         if entities:
             context_parts.append("\nEntities from this conversation:")
-            for e in entities[:50]:
+            for e in entities[:LTM_EPISODE_CONFIG["entities_context"]]:
                 line = f"- {e.canonical_name} ({e.entity_type})"
                 if e.attributes:
                     attrs = ", ".join(f"{k}: {v}" for k, v in e.attributes.items())
@@ -68,7 +70,7 @@ class LTMManager:
 
         if relationships:
             context_parts.append("\nRelationships:")
-            for r in relationships[:30]:
+            for r in relationships[:LTM_EPISODE_CONFIG["relationships_context"]]:
                 subj = await db.get(STMEntity, r.subject_entity_id)
                 obj = await db.get(STMEntity, r.object_entity_id)
                 subj_name = subj.canonical_name if subj else "?"
@@ -112,7 +114,7 @@ Respond with ONLY valid JSON:
         response = await chat_provider.chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=1000,
+            max_tokens=LTM_EPISODE_CONFIG["max_tokens"],
         )
 
         # Parse response — reuse extraction's robust parser

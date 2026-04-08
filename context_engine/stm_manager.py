@@ -14,8 +14,8 @@ from db.models import STMEntity, STMRecap, STMRelationship
 
 logger = logging.getLogger(__name__)
 
-CONFIDENCE_FLOOR = 0.30
-CONFIDENCE_CAP = 0.95
+CONFIDENCE_FLOOR = STM_CONFIG["min_confidence_threshold"]
+CONFIDENCE_CAP = STM_CONFIG["max_confidence"]
 
 
 class STMManager:
