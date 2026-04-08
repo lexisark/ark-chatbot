@@ -118,7 +118,9 @@ class OpenAIEmbeddingProvider:
         task_type: str = "retrieval_document",
     ) -> EmbeddingResponse:
         model = model or self.default_model
-        response = await self.client.embeddings.create(model=model, input=text)
+        response = await self.client.embeddings.create(
+            model=model, input=text, dimensions=self._dimensions,
+        )
         data = response.data[0]
         return EmbeddingResponse(
             embedding=data.embedding,
@@ -134,7 +136,9 @@ class OpenAIEmbeddingProvider:
         task_type: str = "retrieval_document",
     ) -> list[EmbeddingResponse]:
         model = model or self.default_model
-        response = await self.client.embeddings.create(model=model, input=texts)
+        response = await self.client.embeddings.create(
+            model=model, input=texts, dimensions=self._dimensions,
+        )
         return [
             EmbeddingResponse(
                 embedding=d.embedding,

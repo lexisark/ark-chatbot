@@ -1,4 +1,6 @@
 -- Migration 002: Add embedding columns + tsvector for hybrid search across all tiers
+-- NOTE: Default dimension is 768 (Gemini). If using OpenAI (1536) or other dimensions,
+-- change the vector size below to match EMBEDDING_DIMENSIONS in your .env.
 
 -- STM Entity: embedding for semantic search
 ALTER TABLE stm_entity ADD COLUMN IF NOT EXISTS embedding vector(768);
