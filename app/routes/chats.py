@@ -111,7 +111,8 @@ async def _generate_episode_for_chat(chat_provider, embedding_service, db: Async
     if episode:
         await ltm.promote_entities(db, chat.id, chat.scope_id)
         await ltm.promote_relationships(db, chat.id, chat.scope_id)
-        await ltm.apply_importance_decay(db, chat.scope_id)
+        # Note: importance decay is computed at query time (RAG manager),
+        # not persisted, to avoid compounding on repeated calls.
         await db.commit()
         logger.info(f"Episode generated for chat {chat.id} in scope {chat.scope_id}")
         return True

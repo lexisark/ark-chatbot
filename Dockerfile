@@ -2,7 +2,14 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+# Copy everything needed for install
+COPY pyproject.toml README.md ./
+COPY app/ app/
+COPY providers/ providers/
+COPY context_engine/ context_engine/
+COPY db/ db/
+COPY worker/ worker/
+
 RUN pip install --no-cache-dir .
 
 FROM python:3.12-slim

@@ -105,17 +105,26 @@ async def get_chat_messages(
     limit: int = 100,
     after_message_id: uuid.UUID | None = None,
 ) -> list[Message]:
-    stmt = (
-        select(Message)
-        .where(Message.chat_id == chat_id)
-        .order_by(Message.created_at.asc())
-        .limit(limit)
-    )
+    # Build base filter
+    conditions = [Message.chat_id == chat_id]
     if after_message_id:
-        # Get the timestamp of the reference message, then filter after it
         ref_msg = await db.get(Message, after_message_id)
         if ref_msg:
-            stmt = stmt.where(Message.created_at > ref_msg.created_at)
+            conditions.append(Message.created_at > ref_msg.created_at)
+
+    # Get the LAST N messages: subquery selects newest N (DESC), then re-sort ASC
+    subq = (
+        select(Message.id)
+        .where(*conditions)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    ).subquery()
+
+    stmt = (
+        select(Message)
+        .where(Message.id.in_(select(subq.c.id)))
+        .order_by(Message.created_at.asc())
+    )
     result = await db.execute(stmt)
     return list(result.scalars().all())
 

@@ -291,8 +291,11 @@ class RAGManager:
 
             hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
 
-            # Weight by importance (hybrid + confidence weights, no recency for episodes)
-            final_score = (self._score_hybrid + self._score_recency) * hybrid + self._score_confidence * ep.importance_score
+            # Apply importance decay at query time (not stored, avoids compounding)
+            from context_engine.ltm_manager import LTMManager
+            decayed_importance = LTMManager.compute_decayed_importance(ep.importance_score, ep.episode_date)
+
+            final_score = (self._score_hybrid + self._score_recency) * hybrid + self._score_confidence * decayed_importance
 
             scored.append({"episode": ep, "score": final_score})
 

@@ -29,16 +29,21 @@ async def send_message(
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # Save user message
+    # Save user message (commit immediately so it's durable even if LLM fails)
     await queries.create_message(db, chat_id, MessageRole.USER, body.content)
+    await db.commit()
 
     # Build context with token budgeting
     from context_engine.builder import ContextBuilder
-    from providers.token_counter import TiktokenCounter
+    from app.config import settings as app_settings
 
+    token_counter = getattr(request.app.state, "token_counter", None)
+    if token_counter is None:
+        from providers.token_counter import TiktokenCounter
+        token_counter = TiktokenCounter()
     embedding_service = getattr(request.app.state, "embedding_service", None)
-    builder = ContextBuilder(token_counter=TiktokenCounter(), embedding_service=embedding_service)
-    context = await builder.build_context(db, chat_id, current_message=body.content)
+    builder = ContextBuilder(token_counter=token_counter, embedding_service=embedding_service)
+    context = await builder.build_context(db, chat_id, budget_tokens=app_settings.builder_total_budget, current_message=body.content)
     system_instruction, llm_messages = builder.format_for_llm(context)
 
     # Call LLM via provider on app state
@@ -95,8 +100,9 @@ async def send_message_stream(
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # Save user message
+    # Save user message (commit immediately so it's durable even if LLM fails)
     await queries.create_message(db, chat_id, MessageRole.USER, body.content)
+    await db.commit()
 
     # Build context
     from context_engine.builder import ContextBuilder

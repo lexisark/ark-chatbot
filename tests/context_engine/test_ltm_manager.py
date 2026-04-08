@@ -151,44 +151,14 @@ class TestPromoteRelationships:
 
 
 class TestImportanceDecay:
-    async def test_decay_reduces_old_episodes(self, ltm, db_session):
+    def test_decay_reduces_old_episodes(self):
+        """Old episodes should have significantly decayed importance."""
         old_date = datetime.now(timezone.utc) - timedelta(days=14)
+        decayed = LTMManager.compute_decayed_importance(0.9, old_date)
+        assert decayed < 0.9
 
-        episode = LTMEpisode(
-            scope_id="scope-decay",
-            episode_summary="Old episode",
-            keywords=["old"],
-            importance_score=0.9,
-            is_final=True,
-            episode_date=old_date,
-            source_chat_id=uuid.uuid4(),
-        )
-        db_session.add(episode)
-        await db_session.flush()
-        original_score = episode.importance_score
-
-        await ltm.apply_importance_decay(db_session, "scope-decay")
-        await db_session.refresh(episode)
-
-        assert episode.importance_score < original_score
-
-    async def test_recent_episodes_barely_decay(self, ltm, db_session):
+    def test_recent_episodes_barely_decay(self):
+        """Recent episodes should barely decay."""
         recent_date = datetime.now(timezone.utc) - timedelta(hours=1)
-
-        episode = LTMEpisode(
-            scope_id="scope-recent",
-            episode_summary="Recent episode",
-            keywords=["recent"],
-            importance_score=0.9,
-            is_final=True,
-            episode_date=recent_date,
-            source_chat_id=uuid.uuid4(),
-        )
-        db_session.add(episode)
-        await db_session.flush()
-
-        await ltm.apply_importance_decay(db_session, "scope-recent")
-        await db_session.refresh(episode)
-
-        # Should barely change
-        assert episode.importance_score > 0.85
+        decayed = LTMManager.compute_decayed_importance(0.9, recent_date)
+        assert decayed > 0.85

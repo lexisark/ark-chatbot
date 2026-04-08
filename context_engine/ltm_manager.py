@@ -264,24 +264,17 @@ Respond with ONLY valid JSON:
         await db.flush()
         return promoted
 
-    async def apply_importance_decay(
-        self,
-        db: AsyncSession,
-        scope_id: str,
-    ) -> None:
-        """Apply importance decay to episodes based on age (7-day half-life)."""
-        episodes = await db.execute(
-            select(LTMEpisode).where(LTMEpisode.scope_id == scope_id)
-        )
+    @staticmethod
+    def compute_decayed_importance(importance_score: float, episode_date: datetime) -> float:
+        """Compute decayed importance from age. Pure function — no DB mutation.
 
+        Called at query time (in RAG manager) rather than stored,
+        to avoid compounding decay on repeated calls.
+        """
         now = datetime.now(timezone.utc)
-        for ep in episodes.scalars().all():
-            age_days = (now - ep.episode_date).total_seconds() / 86400
-            decay = math.pow(0.5, age_days / EPISODE_DECAY_HALF_LIFE_DAYS)
-            # Apply decay to the original score, not compound
-            ep.importance_score = ep.importance_score * decay
-
-        await db.flush()
+        age_days = max(0.0, (now - episode_date).total_seconds() / 86400)
+        decay = math.pow(0.5, age_days / EPISODE_DECAY_HALF_LIFE_DAYS)
+        return importance_score * decay
 
     async def _find_ltm_entity(
         self, db: AsyncSession, scope_id: str, stm_entity: STMEntity,
