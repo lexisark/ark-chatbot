@@ -2,7 +2,7 @@
 
 **Fast. Accurate. Efficient.** Make your chatbot remember what matters across sessions.
 
-A production-tested context engine that gives any LLM-powered chatbot persistent, cross-session memory. Your chatbot remembers users across conversations — names, relationships, preferences, and conversation history — automatically extracted, efficiently stored, and accurately recalled. Extracted from [Arkadia](https://arkadia.lexisark.com) and tested with Gemini 2.5 Flash Lite for cost-efficient, high-speed inference.
+A context engine that gives any LLM-powered chatbot persistent, cross-session memory. Your chatbot remembers users across conversations — names, relationships, preferences, and conversation history — automatically extracted, efficiently stored, and accurately recalled.
 
 **Cross-session memory** — not just chat history. The engine extracts entities, relationships, and key facts from conversations, then recalls them in future sessions. Start a new chat days later and the chatbot knows who you are.
 
@@ -119,6 +119,8 @@ CHAT_MODEL=claude-sonnet-4-6
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-small
 ```
+
+If you use a non-default embedding dimension, make sure your database vector column size matches `EMBEDDING_DIMENSIONS` before applying migrations or writing embeddings.
 
 ## API
 
@@ -248,7 +250,7 @@ ark-chatbot/
 │   └── in_process.py          # Async job queue (no external deps)
 │
 ├── static/                  # Chat frontend (vanilla HTML/CSS/JS)
-├── tests/                   # 254 tests
+├── tests/                   # Test suite
 ├── docker-compose.yml       # PostgreSQL 17 + pgvector
 └── .env.example             # All configuration documented
 ```
@@ -328,7 +330,7 @@ Then set `CHAT_PROVIDER=my_provider` in `.env`.
 ## Tests
 
 ```bash
-# Run all 254 tests
+# Run the full test suite
 python -m pytest tests/ -v
 
 # Skip live API tests
@@ -337,7 +339,7 @@ python -m pytest tests/ -m "not live"
 
 ## Origin
 
-This engine powers [Arkadia](https://arkadia.lexisark.com), where AI characters maintain persistent memory across thousands of conversations with 91-94% memory recall accuracy.
+This project was extracted from a production conversational memory system and generalized into a standalone engine for building chatbot applications with persistent memory.
 
 ## License
 

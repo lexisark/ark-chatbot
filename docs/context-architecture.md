@@ -34,7 +34,7 @@ The context engine operates three concurrent processing flows:
             ┌───────▼───────┐    ┌───────▼───────┐    ┌───────▼───────┐
             │    Context    │    │   Batch       │    │   Episode     │
             │   Assembly    │    │  Extraction   │    │  Generation   │
-            │   (<120ms)    │    │   (3-5s)      │    │   (5-10s)     │
+            │   Fast Path   │    │  Background   │    │  Background   │
             └───────┬───────┘    └───────┬───────┘    └───────┬───────┘
                     │                     │                     │
             ┌───────▼───────┐    ┌───────▼───────┐    ┌───────▼───────┐
@@ -317,14 +317,14 @@ A narrative episode (~200 tokens) focused on what the user shared:
 }
 ```
 
-The episode is stored with a 768-dim vector embedding for semantic search.
+The episode is stored with a configurable vector embedding for semantic search.
 
 ### Promotion
 
 After episode generation:
 1. **STM entities → LTM entities**: merged by canonical name, highest confidence wins
 2. **STM relationships → LTM relationships**: deduped by subject/predicate/object
-3. **Importance decay**: all existing episodes in the scope get decayed (7-day half-life)
+3. **Importance decay**: episode importance is computed from age at retrieval time using a configurable half-life
 
 This keeps LTM clean: recent conversations are prominent, old ones fade unless reinforced by re-mention.
 
@@ -332,7 +332,7 @@ This keeps LTM clean: recent conversations are prominent, old ones fade unless r
 
 ## Token Efficiency
 
-The engine is designed to run well on cost-efficient models like Gemini 2.5 Flash Lite. Key efficiency decisions:
+The engine is designed to run well on cost-efficient models. Key efficiency decisions:
 
 **Context assembly has zero LLM calls.** It reads from the database and does Python-side scoring. Embeddings are pre-computed. The only LLM call is the actual chat response.
 
@@ -344,7 +344,7 @@ The engine is designed to run well on cost-efficient models like Gemini 2.5 Flas
 
 **Embeddings are generated once, searched many times.** Write-time embedding means search is pure math — no API calls.
 
-### Cost Profile (approximate, Gemini Flash Lite)
+### Cost Profile (illustrative)
 
 | Operation | Frequency | Token Cost |
 |-----------|-----------|------------|
@@ -353,7 +353,7 @@ The engine is designed to run well on cost-efficient models like Gemini 2.5 Flas
 | Episode generation | Per chat session | ~2000 in + ~500 out |
 | Embedding | Per entity/recap/episode | ~100 tokens |
 
-For a 20-message conversation: ~6 chat calls + ~4 extraction calls + 1 episode = ~11 LLM calls total. The memory overhead is ~40% above a memoryless chatbot — in exchange for persistent cross-session recall.
+For a 20-message conversation: ~6 chat calls + ~4 extraction calls + 1 episode = ~11 LLM calls total. Exact token cost depends on your provider, model, extraction cadence, and embedding settings.
 
 ---
 

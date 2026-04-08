@@ -1,4 +1,4 @@
-"""Tests for v2 extraction — Arkadia-style with existing memory context and dedup."""
+"""Tests for v2 extraction with existing memory context and dedup."""
 
 import json
 

@@ -1,6 +1,6 @@
 """Extraction prompt templates, response parsing, and validation.
 
-Implements Arkadia-style extraction with:
+Implements structured conversational memory extraction with:
 - Existing memory context for dedup
 - Per-attribute confidence scoring
 - Pronoun filtering and canonical name validation
