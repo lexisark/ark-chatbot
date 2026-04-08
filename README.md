@@ -1,14 +1,35 @@
 # Ark Chatbot Context Engine
 
-**Fast. Accurate. Efficient.** Make your chatbot remember what matters across sessions.
+Persistent memory for chatbots.
 
-A context engine that gives any LLM-powered chatbot persistent, cross-session memory. Your chatbot remembers users across conversations — names, relationships, preferences, and conversation history — automatically extracted, efficiently stored, and accurately recalled.
+Ark Chatbot Context Engine is a memory layer for conversational applications. If you already have a chatbot, this gives it cross-session memory without forcing you to build a custom memory stack from scratch.
 
-**Cross-session memory** — not just chat history. The engine extracts entities, relationships, and key facts from conversations, then recalls them in future sessions. Start a new chat days later and the chatbot knows who you are.
+It extracts entities, relationships, and summaries from conversations, stores them as short-term and long-term memory, and retrieves what fits inside the current token budget.
 
-**Highly tunable** — every aspect of memory (extraction frequency, scoring weights, decay rates, token budgets, retrieval limits) is configurable via `.env`. Tune the engine to your use case without touching code.
+Use it when you need:
+- Cross-session memory, not just chat history
+- Structured recall of people, pets, places, events, and preferences
+- Token-budgeted retrieval that stays practical in real prompts
+- A self-hosted base you can adapt to your product
 
-**Extensible** — the context engine is a pipeline. Plug in additional RAG sources (documents, knowledge bases, APIs) alongside the built-in conversation memory. Swap LLM providers. Add your own scoring logic.
+This project is for teams building support, coaching, companion, sales, education, or other personalized chatbots. It is not an agent framework; it is the memory layer behind one.
+
+## Why Use It
+
+- **Built for real chatbot flows**: chat/session model, message APIs, background extraction, episodic long-term memory, and a demo UI are included.
+- **Memory that stays usable**: retrieval is hybrid-scored and token-budgeted so memory does not drown the live conversation.
+- **Easy to tune**: extraction cadence, scoring weights, decay rates, and context budgets are all configurable via `.env`.
+- **Easy to extend**: plug in new providers or additional RAG sources without rewriting the pipeline.
+
+## Tech Stack
+
+- **Backend**: Python 3.12, FastAPI, Uvicorn
+- **Database**: PostgreSQL 17, pgvector
+- **ORM / Validation**: SQLAlchemy asyncio, Pydantic
+- **LLM Providers**: Gemini, OpenAI, Anthropic, Ollama
+- **Embeddings**: Gemini or OpenAI
+- **Frontend Demo**: vanilla HTML, CSS, and JavaScript
+- **Testing**: pytest, pytest-asyncio
 
 ## What It Does
 
@@ -77,7 +98,7 @@ LONG-TERM MEMORY (LTM) — per scope (cross-chat)
 ## Quick Start
 
 ```bash
-git clone https://github.com/ArkadiaChat/ark-chatbot-context-engine.git
+git clone <your-repo-url>
 cd ark-chatbot-context-engine
 
 # Copy and edit config
@@ -326,6 +347,13 @@ registry.register_chat("my_provider", MyChatProvider)
 ```
 
 Then set `CHAT_PROVIDER=my_provider` in `.env`.
+
+## Known Limitations
+
+- Background extraction and episode generation run in-process by default. For heavier workloads or multi-instance deployments, replace the in-process queue with a durable worker system.
+- The database vector column size must match `EMBEDDING_DIMENSIONS`. If you change embedding dimensions from the default, update your schema and migrations accordingly.
+- The included API and demo UI are intentionally minimal. Authentication, authorization, multi-tenancy, observability, and hosted-service concerns are left to the integrating application.
+- Provider support is focused on the main chat and embedding paths. If you use non-default provider combinations, validate the exact configuration you plan to deploy.
 
 ## Tests
 
