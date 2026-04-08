@@ -1,8 +1,12 @@
 # Ark Chatbot Context Engine
 
-A production-tested conversational memory engine that gives any LLM-powered chatbot persistent memory across conversations. Extracted from [Arkadia](https://arkadia.lexisark.com).
+A production-tested conversational memory engine that gives any LLM-powered chatbot **cross-session memory**. Your chatbot remembers users across conversations — who they are, what they care about, and what you've talked about before. Extracted from [Arkadia](https://arkadia.lexisark.com).
 
-Your chatbot remembers users, their relationships, preferences, and conversation history — without blowing through token budgets.
+**Cross-session memory** — the chatbot remembers users across separate chat sessions, not just within a single conversation. Start a new chat days later and it recalls your name, your pets, your preferences.
+
+**Tunable** — every aspect of memory (extraction frequency, scoring weights, decay rates, token budgets) is configurable via `.env`. No code changes needed.
+
+**Extensible** — the context engine is designed as a pipeline. Plug in additional RAG sources (documents, knowledge bases, APIs) alongside the built-in conversation memory. Swap LLM providers. Add your own scoring logic.
 
 ## What It Does
 
@@ -264,6 +268,33 @@ LTMRelationship (per scope)
 ```
 
 `scope_id` groups chats for shared long-term memory. One user talking to one assistant = one scope. Multiple users = multiple scopes.
+
+## Extending with Custom RAG Sources
+
+The context engine assembles context from multiple sources into a single token budget. You can add your own sources alongside the built-in conversation memory.
+
+The RAG budget (40% of total by default) is where additional sources plug in. For example, to add document search:
+
+```python
+# In context_engine/builder.py — add your source in the RAG step
+
+# Built-in: conversation memory (entities, recaps, episodes)
+you_remember = await rag.build_you_remember(...)
+
+# Your addition: document search
+doc_results = await your_doc_search(current_message, budget=200)
+
+# Combine into the memory block
+result.memories_text = you_remember_text + "\n\nRelevant documents:\n" + doc_results
+```
+
+Since everything goes through the same `EmbeddingProvider` protocol, your document embeddings use the same vector space as conversation memory — they're searchable together.
+
+Use cases:
+- **Knowledge base RAG** — product docs, FAQs, policies
+- **User-uploaded documents** — PDFs, notes, files
+- **External APIs** — CRM data, calendar events, task lists
+- **Domain knowledge** — medical, legal, technical references
 
 ## Adding a Provider
 
