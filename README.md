@@ -1,12 +1,14 @@
 # Ark Chatbot Context Engine
 
-A production-tested conversational memory engine that gives any LLM-powered chatbot **cross-session memory**. Your chatbot remembers users across conversations — who they are, what they care about, and what you've talked about before. Extracted from [Arkadia](https://arkadia.lexisark.com).
+**Fast. Accurate. Efficient.** Make your chatbot remember what matters across sessions.
 
-**Cross-session memory** — the chatbot remembers users across separate chat sessions, not just within a single conversation. Start a new chat days later and it recalls your name, your pets, your preferences.
+A production-tested context engine that gives any LLM-powered chatbot persistent, cross-session memory. Your chatbot remembers users across conversations — names, relationships, preferences, and conversation history — automatically extracted, efficiently stored, and accurately recalled. Extracted from [Arkadia](https://arkadia.lexisark.com) and tested with Gemini 2.5 Flash Lite for cost-efficient, high-speed inference.
 
-**Tunable** — every aspect of memory (extraction frequency, scoring weights, decay rates, token budgets) is configurable via `.env`. No code changes needed.
+**Cross-session memory** — not just chat history. The engine extracts entities, relationships, and key facts from conversations, then recalls them in future sessions. Start a new chat days later and the chatbot knows who you are.
 
-**Extensible** — the context engine is designed as a pipeline. Plug in additional RAG sources (documents, knowledge bases, APIs) alongside the built-in conversation memory. Swap LLM providers. Add your own scoring logic.
+**Highly tunable** — every aspect of memory (extraction frequency, scoring weights, decay rates, token budgets, retrieval limits) is configurable via `.env`. Tune the engine to your use case without touching code.
+
+**Extensible** — the context engine is a pipeline. Plug in additional RAG sources (documents, knowledge bases, APIs) alongside the built-in conversation memory. Swap LLM providers. Add your own scoring logic.
 
 ## What It Does
 
