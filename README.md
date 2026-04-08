@@ -1,6 +1,6 @@
 # Ark Chatbot Context Engine
 
-A production-tested conversational memory engine that gives any LLM-powered chatbot persistent memory across conversations. Extracted from [Arkadia](https://arkadia.chat).
+A production-tested conversational memory engine that gives any LLM-powered chatbot persistent memory across conversations. Extracted from [Arkadia](https://arkadia.lexisark.com).
 
 Your chatbot remembers users, their relationships, preferences, and conversation history — without blowing through token budgets.
 
@@ -304,7 +304,7 @@ python -m pytest tests/ -m "not live"
 
 ## Origin
 
-This engine powers [Arkadia](https://arkadia.chat), where AI characters maintain persistent memory across thousands of conversations with 91-94% memory recall accuracy.
+This engine powers [Arkadia](https://arkadia.lexisark.com), where AI characters maintain persistent memory across thousands of conversations with 91-94% memory recall accuracy.
 
 ## License
 
