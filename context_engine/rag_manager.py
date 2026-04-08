@@ -291,8 +291,8 @@ class RAGManager:
 
             hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
 
-            # Weight by importance
-            final_score = 0.5 * hybrid + 0.5 * ep.importance_score
+            # Weight by importance (hybrid + confidence weights, no recency for episodes)
+            final_score = (self._score_hybrid + self._score_recency) * hybrid + self._score_confidence * ep.importance_score
 
             scored.append({"episode": ep, "score": final_score})
 
@@ -324,7 +324,7 @@ class RAGManager:
                     vector_score = _cosine_distance_to_score(distance)
 
             hybrid = self._fts_weight * fts_score + self._vector_weight * vector_score
-            final_score = 0.5 * hybrid + 0.5 * e.overall_confidence
+            final_score = (self._score_hybrid + self._score_recency) * hybrid + self._score_confidence * e.overall_confidence
 
             scored.append({"entity": e, "score": final_score})
 
