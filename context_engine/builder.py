@@ -149,8 +149,17 @@ class ContextBuilder:
         if result.memories_text:
             parts.append(
                 "MEMORIES:\n"
-                "What you remember about this user from past conversations:\n\n"
+                "What you remember about this user from past conversations is listed below.\n"
+                "Do NOT invent or guess details that aren't listed here.\n\n"
                 + result.memories_text
+            )
+        else:
+            parts.append(
+                "MEMORIES:\n"
+                "You are designed to maintain memories of past conversations, but none are available at the moment.\n"
+                "This could be a first conversation or the memory system may not have retrieved them.\n"
+                'If asked about past interactions, simply say "I\'m sorry, I don\'t recall."\n'
+                "Do not make up or fabricate any details about the user."
             )
 
         system_instruction = "\n\n".join(parts)
