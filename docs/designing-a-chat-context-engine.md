@@ -278,6 +278,10 @@ If a fact already appears in the recent message window, do not waste budget re-i
 
 This sounds small, but it matters. A memory system should add missing context, not echo what the model can already see.
 
+### 5. Show memory age
+
+At retrieval time, compute each memory's age from its stored timestamp (`created_at` or `last_mentioned`) and convert it to a relative string — "today", "1 day ago", "5 days ago" — before injecting it into the prompt. Day-level granularity is enough. The LLM uses it to weight recent vs old information and can reference age naturally in responses.
+
 ## Why Hybrid Retrieval Beats a Single Method
 
 A hybrid approach works better because no single retrieval strategy works well by itself.
@@ -300,6 +304,10 @@ For example:
 This is the difference between "the system found something related" and "the system found the memory that should actually be in the prompt."
 
 Confidence and decay are especially important here. They are not just storage metadata. They become active ranking inputs during retrieval. In a production context engine, confidence should be shaped by the extractor and reinforcement logic, while decay should keep stale memory from overwhelming the prompt without erasing durable knowledge too aggressively.
+
+### When You Don't Need Hybrid
+
+Hybrid is the default in `ark-chatbot`, but you can ship with FTS only. Lexical search is fast, cheap, and accurate enough when entity names are exact and queries are short. Vector search earns its weight when users describe things indirectly ("my puppy" → "Max the dog"). A reasonable starting point: FTS-only for STM, hybrid only for long-term episodes.
 
 ![Context assembly with recent messages, hybrid retrieval, and token budgeting](/blog/diagram-4-context-assembly.svg)
 
