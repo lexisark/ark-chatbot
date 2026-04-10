@@ -95,6 +95,8 @@ LONG-TERM MEMORY (LTM) — per scope (cross-chat)
 - Adaptive recency scoring (mention frequency + confidence decay)
 - Context window dedup (excludes memories already visible in recent messages)
 
+> **Note on search strategy**: This implementation uses hybrid search (FTS + vector) across all tiers — STM and LTM. For many use cases, **lexical search (FTS) alone is fast and accurate enough**, especially for STM where entity names are exact and queries are short. Hybrid is enabled everywhere here to handle fuzzy matches like "my puppy" → "Max (pet/dog)", but you can disable vector search per tier by setting `RAG_HYBRID_VECTOR_WEIGHT=0` and skipping embedding generation. Pure FTS is faster, cheaper (no embedding API calls on writes), and works without pgvector.
+
 ## Quick Start
 
 ```bash

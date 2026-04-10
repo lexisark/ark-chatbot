@@ -46,6 +46,20 @@ def _keyword_match_score(text_to_match: str, keywords: list[str]) -> float:
     return matches / len(keywords)
 
 
+def _relative_time(timestamp: datetime) -> str:
+    """Format a timestamp as a simple relative time string."""
+    from datetime import timezone as tz
+    hours_ago = (datetime.now(tz.utc) - timestamp).total_seconds() / 3600
+    days_ago = int(hours_ago / 24)
+
+    if days_ago == 0:
+        return "today"
+    elif days_ago == 1:
+        return "1 day ago"
+    else:
+        return f"{days_ago} days ago"
+
+
 def _cosine_distance_to_score(distance: float) -> float:
     """Convert cosine distance (0=identical, 2=opposite) to score (1=identical, 0=far)."""
     return max(0.0, 1.0 - distance)
@@ -126,7 +140,8 @@ class RAGManager:
             db, chat_id, keywords, query_embedding, context_window_start,
         )
         for e in stm_entities:
-            line = f"- {e['entity'].canonical_name} ({e['entity'].entity_type})"
+            age = _relative_time(e['entity'].last_mentioned)
+            line = f"- ({age}) {e['entity'].canonical_name} ({e['entity'].entity_type})"
             if e['entity'].attributes:
                 attrs = ", ".join(f"{k}: {v}" for k, v in e['entity'].attributes.items())
                 line += f" — {attrs}"
@@ -139,20 +154,23 @@ class RAGManager:
             obj = await db.get(STMEntity, r.object_entity_id)
             subj_name = subj.canonical_name if subj else "?"
             obj_name = obj.canonical_name if obj else "?"
-            block.relationships.append(f"- {subj_name} {r.predicate} {obj_name}")
+            age = _relative_time(r.last_mentioned)
+            block.relationships.append(f"- ({age}) {subj_name} {r.predicate} {obj_name}")
 
         # ── STM: recaps (hybrid scored, context window dedup) ───
         stm_recaps = await self._search_stm_recaps(
             db, chat_id, keywords, query_embedding, context_window_start,
         )
         for r in stm_recaps:
-            block.recaps.append(f"- {r['recap'].recap_text}")
+            age = _relative_time(r['recap'].created_at)
+            block.recaps.append(f"- ({age}) {r['recap'].recap_text}")
 
         # ── LTM: episodes (hybrid scored) ───────────────
         if scope_id and episode_budget > 0:
             ltm_episodes = await self._search_ltm_episodes(db, scope_id, chat_id, keywords, query_embedding)
             for ep in ltm_episodes:
-                block.episodes.append(f"- {ep['episode'].episode_summary}")
+                age = _relative_time(ep['episode'].episode_date)
+                block.episodes.append(f"- {age}: {ep['episode'].episode_summary}")
 
         # ── LTM: entities (hybrid scored) ───────────────
         if scope_id:
@@ -161,7 +179,8 @@ class RAGManager:
                 # Avoid duplicating STM entities already in block
                 name = e['entity'].canonical_name
                 if not any(name in line for line in block.entities):
-                    line = f"- {name} ({e['entity'].entity_type})"
+                    age = _relative_time(e['entity'].created_at)
+                    line = f"- ({age}) {name} ({e['entity'].entity_type})"
                     if e['entity'].attributes:
                         attrs = ", ".join(f"{k}: {v}" for k, v in e['entity'].attributes.items())
                         line += f" — {attrs}"
